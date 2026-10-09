@@ -1,0 +1,7 @@
+# Windows download metadata
+*:Zone.Identifier
+
+# macOS metadata
+.DS_Store
+__MACOSX/
+._*
