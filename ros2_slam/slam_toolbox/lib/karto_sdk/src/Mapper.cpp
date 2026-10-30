@@ -1502,6 +1502,14 @@ kt_bool MapperGraph::TryCloseLoop(LocalizedRangeScan * pScan, const Name & rSens
       } else {
         m_pMapper->FireBeginLoopClosure("Closing loop...");
 
+        std::cout << "KARTO_LOOP_ACCEPT"
+                  << " state_id=" << pScan->GetStateId()
+                  << " response=" << fineResponse
+                  << " best=(" << bestPose.GetX() << ","
+                  << bestPose.GetY() << ","
+                  << bestPose.GetHeading() << ")"
+                  << std::endl;
+
         pScan->SetSensorPose(bestPose);
         LinkChainToScan(candidateChain, pScan, bestPose, covariance);
         CorrectPoses();
@@ -2640,10 +2648,27 @@ kt_bool Mapper::Process(LocalizedRangeScan * pScan)
     // correct scan (if not first scan)
     if (m_pUseScanMatching->GetValue() && pLastScan != NULL) {
       Pose2 bestPose;
-      m_pSequentialScanMatcher->MatchScan(pScan,
+      const Pose2 odometricPose = pScan->GetOdometricPose();
+      const Pose2 searchCenter = pScan->GetSensorPose();
+      const kt_double response = m_pSequentialScanMatcher->MatchScan(pScan,
         m_pMapperSensorManager->GetRunningScans(pScan->GetSensorName()),
         bestPose,
         covariance);
+      std::cout << "KARTO_SEQ_MATCH"
+                << " odom=(" << odometricPose.GetX() << ","
+                << odometricPose.GetY() << ","
+                << odometricPose.GetHeading() << ")"
+                << " search=(" << searchCenter.GetX() << ","
+                << searchCenter.GetY() << ","
+                << searchCenter.GetHeading() << ")"
+                << " best=(" << bestPose.GetX() << ","
+                << bestPose.GetY() << ","
+                << bestPose.GetHeading() << ")"
+                << " response=" << response
+                << " covariance=(" << covariance(0, 0) << ","
+                << covariance(1, 1) << ","
+                << covariance(2, 2) << ")"
+                << std::endl;
       pScan->SetSensorPose(bestPose);
     }
 
@@ -2654,6 +2679,14 @@ kt_bool Mapper::Process(LocalizedRangeScan * pScan)
       // add to graph
       m_pGraph->AddVertex(pScan);
       m_pGraph->AddEdges(pScan, covariance);
+
+      const Pose2 finalPose = pScan->GetSensorPose();
+      std::cout << "KARTO_SCAN_FINAL"
+                << " state_id=" << pScan->GetStateId()
+                << " pose=(" << finalPose.GetX() << ","
+                << finalPose.GetY() << ","
+                << finalPose.GetHeading() << ")"
+                << std::endl;
 
       m_pMapperSensorManager->AddRunningScan(pScan);
 

@@ -141,6 +141,20 @@ void SlamToolbox::setParams()
   scan_topic_ = std::string("/scan");
   scan_topic_ = this->declare_parameter("scan_topic", scan_topic_);
 
+  scan_distance_gate_mode_ = std::string("legacy");
+  scan_distance_gate_mode_ = this->declare_parameter(
+    "scan_distance_gate_mode", scan_distance_gate_mode_);
+  if (scan_distance_gate_mode_ != "legacy" &&
+    scan_distance_gate_mode_ != "euclidean")
+  {
+    RCLCPP_FATAL(get_logger(),
+      "scan_distance_gate_mode must be 'legacy' or 'euclidean', got '%s'",
+      scan_distance_gate_mode_.c_str());
+    exit(1);
+  }
+  RCLCPP_INFO(get_logger(), "Scan distance gate mode: %s",
+    scan_distance_gate_mode_.c_str());
+
   throttle_scans_ = 1;
   throttle_scans_ = this->declare_parameter("throttle_scans", throttle_scans_);
 
@@ -494,13 +508,26 @@ bool SlamToolbox::shouldProcessScan(
     return false;
   }
 
-  // check moved enough, within 10% for correction error
-  const double dist2 = fabs((last_pose.GetX() - pose.GetX()) * (last_pose.GetX() -
-      pose.GetX()) + (last_pose.GetY() - pose.GetY()) *
-      (last_pose.GetX() - pose.GetY()));
+  // The legacy Eloquent implementation contains a coordinate-dependent
+  // cross-term in place of dy^2. Keep it selectable so an instrumented
+  // baseline and the one-variable correction can be run from the same build.
+  const double dx = last_pose.GetX() - pose.GetX();
+  const double dy = last_pose.GetY() - pose.GetY();
+  double dist2 = 0.0;
+  if (scan_distance_gate_mode_ == "euclidean") {
+    dist2 = dx * dx + dy * dy;
+  } else {
+    dist2 = fabs(dx * dx + dy * (last_pose.GetX() - pose.GetY()));
+  }
   if (dist2 < 0.8 * min_dist2 || scan_ctr < 5) {
     return false;
   }
+
+  RCLCPP_INFO(get_logger(),
+    "SCAN_GATE_ACCEPT mode=%s pose=(%.6f,%.6f) delta=(%.6f,%.6f) "
+    "dist2=%.6f threshold=%.6f",
+    scan_distance_gate_mode_.c_str(), pose.GetX(), pose.GetY(), dx, dy,
+    dist2, 0.8 * min_dist2);
 
   last_pose = pose;
   last_scan_time = scan->header.stamp;
