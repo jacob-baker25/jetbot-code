@@ -1,0 +1,202 @@
+{
+  "checkpoints": [
+    {
+      "index": 0,
+      "label": "start",
+      "rf2o": {
+        "x": 0.0,
+        "y": 0.0,
+        "yaw_deg": 0.0
+      },
+      "slam": {
+        "x": 0.0,
+        "y": 0.0,
+        "yaw_deg": 0.0
+      },
+      "time_unix": 1793390697.3796287
+    },
+    {
+      "index": 1,
+      "label": "before90turn",
+      "rf2o": {
+        "x": 2.6996832237143265,
+        "y": 0.06749712907048093,
+        "yaw_deg": 5.146685093878202
+      },
+      "slam": {
+        "x": 2.5404946931049754,
+        "y": 0.0432034714104608,
+        "yaw_deg": 3.9469114708742836
+      },
+      "time_unix": 1793390740.1475368
+    },
+    {
+      "index": 2,
+      "label": "after90turn",
+      "rf2o": {
+        "x": 2.682552040689536,
+        "y": 0.07230328284389632,
+        "yaw_deg": -87.41125687210706
+      },
+      "slam": {
+        "x": 2.5234678993196304,
+        "y": 0.04836727226970561,
+        "yaw_deg": -88.61103049511097
+      },
+      "time_unix": 1793390763.0382285
+    },
+    {
+      "index": 3,
+      "label": "farend",
+      "rf2o": {
+        "x": 3.1692095467551655,
+        "y": -4.7444950297235176,
+        "yaw_deg": -76.80380280659053
+      },
+      "slam": {
+        "x": 2.2785965235784875,
+        "y": -4.029881289511925,
+        "yaw_deg": -91.20108628263785
+      },
+      "time_unix": 1793390804.217923
+    },
+    {
+      "index": 4,
+      "label": "after180turn",
+      "rf2o": {
+        "x": 3.1517028084761085,
+        "y": -4.624330172216317,
+        "yaw_deg": 93.68880926319044
+      },
+      "slam": {
+        "x": 2.2488788069307404,
+        "y": -3.9289033805994213,
+        "yaw_deg": 80.89122395114829
+      },
+      "time_unix": 1793390819.9786668
+    },
+    {
+      "index": 5,
+      "label": "backatcorner",
+      "rf2o": {
+        "x": 2.4931003040688617,
+        "y": 0.3400880971263354,
+        "yaw_deg": 102.80065726972168
+      },
+      "slam": {
+        "x": 2.662327636720664,
+        "y": 1.4748613077816661,
+        "yaw_deg": 90.00307195767971
+      },
+      "time_unix": 1793390868.0179834
+    },
+    {
+      "index": 6,
+      "label": "afterreturn90turn",
+      "rf2o": {
+        "x": 2.4948114442529974,
+        "y": 0.34741411865598965,
+        "yaw_deg": -173.8244553138608
+      },
+      "slam": {
+        "x": 2.665619037926668,
+        "y": 1.481626311128586,
+        "yaw_deg": 173.37795937409723
+      },
+      "time_unix": 1793390886.9590986
+    },
+    {
+      "index": 7,
+      "label": "final",
+      "rf2o": {
+        "x": -0.1508573904883128,
+        "y": 0.03039893309287431,
+        "yaw_deg": 13.788389330235747
+      },
+      "slam": {
+        "x": 0.316839119901384,
+        "y": 1.4120482914677066,
+        "yaw_deg": 0.7908417476931326
+      },
+      "time_unix": 1793390923.0784478
+    }
+  ],
+  "configuration": {
+    "drive_speed": 0.25,
+    "laser_yaw_rad": 3.14159265,
+    "laser_z_m": 0.1778,
+    "slam_scan_delay_seconds": 0.3,
+    "slam_scan_topic": "/scan_slam",
+    "turn_speed": 0.18,
+    "watchdog_seconds": 0.15
+  },
+  "experiment_name": "elbow_test_02",
+  "map": {
+    "height_m": 22.050000328570604,
+    "height_pixels": 441,
+    "resolution_m_per_pixel": 0.05000000074505806,
+    "width_m": 16.700000248849392,
+    "width_pixels": 334
+  },
+  "segments": [
+    {
+      "from": "start",
+      "rf2o_distance_m": 2.700526869119679,
+      "rf2o_heading_deg": 5.146685093878202,
+      "slam_distance_m": 2.5408620241241864,
+      "slam_heading_deg": 3.9469114708742836,
+      "to": "before90turn"
+    },
+    {
+      "from": "before90turn",
+      "rf2o_distance_m": 0.017792598065560387,
+      "rf2o_heading_deg": -92.55794196598526,
+      "slam_distance_m": 0.01779259806556087,
+      "slam_heading_deg": -92.55794196598525,
+      "to": "after90turn"
+    },
+    {
+      "from": "after90turn",
+      "rf2o_distance_m": 4.8413202240878785,
+      "rf2o_heading_deg": 10.607454065516535,
+      "slam_distance_m": 4.085593386808249,
+      "slam_heading_deg": -2.590055787526879,
+      "to": "farend"
+    },
+    {
+      "from": "farend",
+      "rf2o_distance_m": 0.1214334338841538,
+      "rf2o_heading_deg": 170.49261206978096,
+      "slam_distance_m": 0.10526006256457243,
+      "slam_heading_deg": 172.09231023378612,
+      "to": "after180turn"
+    },
+    {
+      "from": "after180turn",
+      "rf2o_distance_m": 5.007914337505644,
+      "rf2o_heading_deg": 9.111848006531247,
+      "slam_distance_m": 5.419558353062453,
+      "slam_heading_deg": 9.111848006531417,
+      "to": "backatcorner"
+    },
+    {
+      "from": "backatcorner",
+      "rf2o_distance_m": 0.007523203585090664,
+      "rf2o_heading_deg": 83.37488741641755,
+      "slam_distance_m": 0.007523203585090568,
+      "slam_heading_deg": 83.37488741641752,
+      "to": "afterreturn90turn"
+    },
+    {
+      "from": "afterreturn90turn",
+      "rf2o_distance_m": 2.66459419255523,
+      "rf2o_heading_deg": -172.38715535590345,
+      "slam_distance_m": 2.3498102485389727,
+      "slam_heading_deg": -172.5871176264041,
+      "to": "final"
+    }
+  ],
+  "session_end_unix": 1793390923.0844939,
+  "session_name": "elbow_test_02_20261030_130427",
+  "session_start_unix": 1793390667.2543006
+}

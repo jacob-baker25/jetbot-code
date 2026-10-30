@@ -1,0 +1,15 @@
+[INFO] [launch]: All log files can be found below /home/jetbot/.ros/log/2026-10-30-12-48-16-977989-nano-4gb-jp45-22839
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [slam_toolbox-1]: process started with pid [22992]
+[slam_toolbox-1] [INFO] [slam_toolbox]: Node using stack size 40000000
+[slam_toolbox-1] [INFO] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[slam_toolbox-1] [INFO] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793389697.238 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793389697.304 for reason 'Unknown'
+[slam_toolbox-1] Registering sensor: [Custom Described Lidar]
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793389697.378 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793389916.825 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793389916.898 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [rclcpp]: signal_handler(signal_value=2)
+[INFO] [slam_toolbox-1]: process has finished cleanly [pid 22992]

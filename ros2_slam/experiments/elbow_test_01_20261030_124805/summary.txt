@@ -1,0 +1,67 @@
+Experiment: elbow_test_01
+Session: elbow_test_01_20261030_124805
+
+Checkpoint 0: start
+  RF2O: x=+0.040 y=-0.003 yaw=-0.1 deg
+  SLAM: x=+0.040 y=-0.003 yaw=-0.1 deg
+
+Checkpoint 1: before_90_turn
+  RF2O: x=+2.658 y=+0.100 yaw=+5.8 deg
+  SLAM: x=+2.510 y=-0.367 yaw=+3.6 deg
+
+Checkpoint 2: after_90_turn
+  RF2O: x=+2.641 y=+0.094 yaw=-82.6 deg
+  SLAM: x=+2.493 y=-0.372 yaw=-84.8 deg
+
+Checkpoint 3: far_end
+  RF2O: x=+2.862 y=-4.066 yaw=-81.1 deg
+  SLAM: x=+1.679 y=-3.356 yaw=-91.5 deg
+
+Checkpoint 4: after_180_turn
+  RF2O: x=+2.880 y=-4.123 yaw=+92.3 deg
+  SLAM: x=+1.627 y=-3.356 yaw=+80.5 deg
+
+Checkpoint 5: back_at_corner
+  RF2O: x=+2.706 y=-0.139 yaw=+94.3 deg
+  SLAM: x=+2.422 y=+0.372 yaw=+89.9 deg
+
+Checkpoint 6: after_return_90_turn
+  RF2O: x=+2.738 y=-0.127 yaw=+179.4 deg
+  SLAM: x=+2.455 y=+0.382 yaw=+175.0 deg
+
+Checkpoint 7: final
+  RF2O: x=+0.278 y=-0.105 yaw=-2.5 deg
+  SLAM: x=+0.097 y=+0.464 yaw=-8.5 deg
+
+
+SEGMENTS
+========
+
+start -> before_90_turn
+  RF2O: 2.620 m, +5.9 deg
+  SLAM: 2.496 m, +3.7 deg
+
+before_90_turn -> after_90_turn
+  RF2O: 0.018 m, -88.4 deg
+  SLAM: 0.018 m, -88.4 deg
+
+after_90_turn -> far_end
+  RF2O: 4.166 m, +1.5 deg
+  SLAM: 3.093 m, -6.7 deg
+
+far_end -> after_180_turn
+  RF2O: 0.060 m, +173.4 deg
+  SLAM: 0.052 m, +172.0 deg
+
+after_180_turn -> back_at_corner
+  RF2O: 3.988 m, +2.0 deg
+  SLAM: 3.812 m, +9.4 deg
+
+back_at_corner -> after_return_90_turn
+  RF2O: 0.034 m, +85.1 deg
+  SLAM: 0.034 m, +85.1 deg
+
+after_return_90_turn -> final
+  RF2O: 2.460 m, +178.1 deg
+  SLAM: 2.360 m, +176.5 deg
+
