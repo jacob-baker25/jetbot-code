@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import csv
 import json
 import math
 import os
@@ -164,7 +165,11 @@ def timestamp_string():
 
 class MappingSession(Node):
 
-    def __init__(self, experiment_name):
+    def __init__(
+        self,
+        experiment_name,
+        scan_distance_gate_mode
+    ):
 
         super().__init__(
             "mapping_session"
@@ -172,6 +177,10 @@ class MappingSession(Node):
 
         self.experiment_name = (
             experiment_name
+        )
+
+        self.scan_distance_gate_mode = (
+            scan_distance_gate_mode
         )
 
         self.session_name = (
@@ -214,6 +223,42 @@ class MappingSession(Node):
 
         self.processes = []
         self.log_files = []
+
+        self.trajectory_sample_count = 0
+        self.trajectory_path = os.path.join(
+            self.experiment_dir,
+            "trajectory.csv"
+        )
+        self.trajectory_file = open(
+            self.trajectory_path,
+            "w",
+            newline=""
+        )
+        self.log_files.append(
+            self.trajectory_file
+        )
+        self.trajectory_writer = csv.writer(
+            self.trajectory_file
+        )
+        self.trajectory_writer.writerow([
+            "time_unix",
+            "elapsed_s",
+            "rf2o_stamp_s",
+            "moving",
+            "last_checkpoint",
+            "rf2o_x_m",
+            "rf2o_y_m",
+            "rf2o_yaw_deg",
+            "slam_x_m",
+            "slam_y_m",
+            "slam_yaw_deg",
+            "map_to_odom_x_m",
+            "map_to_odom_y_m",
+            "map_to_odom_yaw_deg",
+            "slam_minus_rf2o_x_m",
+            "slam_minus_rf2o_y_m",
+            "slam_minus_rf2o_yaw_deg",
+        ])
 
         self.stack_stopped = False
 
@@ -267,6 +312,11 @@ class MappingSession(Node):
             qos_profile_sensor_data
         )
 
+        self.create_timer(
+            0.1,
+            self.record_trajectory_sample
+        )
+
 
     # ========================================================
     # ROS CALLBACKS
@@ -284,6 +334,13 @@ class MappingSession(Node):
         )
 
         self.last_odom = {
+            "stamp_s": float(
+                msg.header.stamp.sec
+                +
+                msg.header.stamp.nanosec
+                *
+                1e-9
+            ),
             "x": float(
                 msg.pose.pose.position.x
             ),
@@ -333,6 +390,58 @@ class MappingSession(Node):
         except Exception:
 
             self.scan_tf_test_fail += 1
+
+
+    def record_trajectory_sample(self):
+
+        if self.last_odom is None:
+            return
+
+        slam = self.get_slam_pose()
+        map_to_odom = self.lookup_pose(
+            MAP_FRAME,
+            ODOM_FRAME
+        )
+
+        if slam is None or map_to_odom is None:
+            return
+
+        rf2o = self.last_odom
+        last_checkpoint = ""
+
+        if self.checkpoints:
+            last_checkpoint = self.checkpoints[-1][
+                "label"
+            ]
+
+        self.trajectory_writer.writerow([
+            time.time(),
+            time.time() - self.session_start_unix,
+            rf2o["stamp_s"],
+            int(self.moving),
+            last_checkpoint,
+            rf2o["x"],
+            rf2o["y"],
+            rf2o["yaw_deg"],
+            slam["x"],
+            slam["y"],
+            slam["yaw_deg"],
+            map_to_odom["x"],
+            map_to_odom["y"],
+            map_to_odom["yaw_deg"],
+            slam["x"] - rf2o["x"],
+            slam["y"] - rf2o["y"],
+            wrap_degrees(
+                slam["yaw_deg"]
+                -
+                rf2o["yaw_deg"]
+            ),
+        ])
+
+        self.trajectory_sample_count += 1
+
+        if self.trajectory_sample_count % 10 == 0:
+            self.trajectory_file.flush()
 
 
     # ========================================================
@@ -590,7 +699,10 @@ class MappingSession(Node):
                 "ros2 launch "
                 "slam_toolbox "
                 "online_sync_launch.py "
-                "use_sim_time:=false"
+                "use_sim_time:=false "
+                "scan_distance_gate_mode:={}"
+            ).format(
+                self.scan_distance_gate_mode
             )
         )
 
@@ -1857,6 +1969,10 @@ class MappingSession(Node):
                 "slam_scan_delay_seconds": (
                     0.30
                 ),
+
+                "scan_distance_gate_mode": (
+                    self.scan_distance_gate_mode
+                ),
             },
 
             "map": map_info,
@@ -2530,7 +2646,7 @@ class MappingSession(Node):
 
 def main():
 
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in [2, 3]:
 
         print()
         print(
@@ -2539,7 +2655,8 @@ def main():
 
         print(
             "  python3 mapping_session.py "
-            "EXPERIMENT_NAME"
+            "EXPERIMENT_NAME "
+            "[legacy|euclidean]"
         )
 
         print()
@@ -2549,7 +2666,7 @@ def main():
 
         print(
             "  python3 mapping_session.py "
-            "elbow_test_01"
+            "elbow_baseline_01 legacy"
         )
 
         sys.exit(1)
@@ -2558,10 +2675,27 @@ def main():
         sys.argv[1]
     )
 
+    scan_distance_gate_mode = "legacy"
+
+    if len(sys.argv) == 3:
+        scan_distance_gate_mode = sys.argv[2]
+
+    if scan_distance_gate_mode not in [
+        "legacy",
+        "euclidean"
+    ]:
+
+        print(
+            "Gate mode must be "
+            "'legacy' or 'euclidean'."
+        )
+        sys.exit(1)
+
     rclpy.init()
 
     node = MappingSession(
-        experiment_name
+        experiment_name,
+        scan_distance_gate_mode
     )
 
     exit_code = 1
