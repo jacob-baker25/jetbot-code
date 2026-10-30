@@ -1,0 +1,6 @@
+[INFO] [rplidar_python_bridge]: Resetting RPLidar to a clean state
+[INFO] [rplidar_python_bridge]: RPLidar connected: {'model': 44, 'firmware': (1, 32), 'hardware': 6, 'serialnumber': '77EDECF0C3E09ED2A0EA98F3E4354110'}
+[INFO] [rplidar_python_bridge]: RPLidar health: ('Good', 0)
+[INFO] [rplidar_python_bridge]: Starting RPLidar scan loop
+[INFO] [rplidar_python_bridge]: Stopping RPLidar
+[INFO] [rplidar_python_bridge]: Stopping RPLidar

@@ -1,0 +1,26 @@
+[INFO] [launch]: All log files can be found below /home/jetbot/.ros/log/2026-10-30-13-19-05-346637-nano-4gb-jp45-20074
+[INFO] [launch]: Default logging verbosity is set to INFO
+[INFO] [slam_toolbox-1]: process started with pid [20227]
+[slam_toolbox-1] [INFO] [slam_toolbox]: Node using stack size 40000000
+[slam_toolbox-1] [INFO] [slam_toolbox]: Using solver plugin solver_plugins::CeresSolver
+[slam_toolbox-1] [INFO] [slam_toolbox]: CeresSolver: Using SCHUR_JACOBI preconditioner.
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391545.571 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391545.662 for reason 'Unknown'
+[slam_toolbox-1] Registering sensor: [Custom Described Lidar]
+[WARNING] [launch]: user interrupted with ctrl-c (SIGINT)
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391545.721 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391550.111 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391550.191 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391550.259 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391550.334 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391550.414 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391612.680 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391612.755 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391612.829 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391612.903 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391612.977 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391613.051 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391613.126 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [slam_toolbox]: Message Filter dropping message: frame 'laser_frame' at time 1793391652.729 for reason 'Unknown'
+[slam_toolbox-1] [INFO] [rclcpp]: signal_handler(signal_value=2)
+[INFO] [slam_toolbox-1]: process has finished cleanly [pid 20227]

@@ -1,0 +1,2 @@
+[INFO] [static_transform_publisher]: Spinning until killed publishing base_link to laser_frame
+[INFO] [rclcpp]: signal_handler(signal_value=2)
