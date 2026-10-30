@@ -23,11 +23,22 @@ Jetson versions under `~/autochair_ros2_ws/backups/`.
 ```bash
 cd ~/autochair_ros2_ws
 source /opt/ros/eloquent/setup.bash
-colcon build --packages-select slam_toolbox --symlink-install
+colcon build \
+  --packages-select slam_toolbox \
+  --symlink-install \
+  --cmake-clean-cache \
+  --cmake-args -DBUILD_TESTING=OFF
 source install/setup.bash
 ```
 
-Do not proceed if the build fails.
+The JetBot deployment does not need the Slam Toolbox unit-test executables.
+Disabling them also avoids linking the workspace's cached GoogleTest archive on
+the Jetson. Do not source the workspace or proceed if the build fails.
+
+If sourcing the workspace reports a missing package setup file (for example,
+`rplidar_ros/local_setup.bash`), that is a separate stale-install problem. Do
+not ignore it: rebuild that package if it is present in `src`, or remove its
+stale install entry before running an experiment.
 
 ## 3. Stationary smoke test
 

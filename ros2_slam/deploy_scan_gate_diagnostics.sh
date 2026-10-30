@@ -58,4 +58,7 @@ done
 
 echo
 echo "Backup: ${BACKUP_ROOT}"
-echo "Deployment complete. Build Slam Toolbox before running experiments."
+echo "Deployment complete. Build Slam Toolbox before running experiments:"
+echo "  cd ${WORKSPACE}"
+echo "  source /opt/ros/eloquent/setup.bash"
+echo "  colcon build --packages-select slam_toolbox --symlink-install --cmake-clean-cache --cmake-args -DBUILD_TESTING=OFF"
