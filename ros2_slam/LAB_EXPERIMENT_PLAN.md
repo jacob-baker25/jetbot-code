@@ -37,8 +37,26 @@ the Jetson. Do not source the workspace or proceed if the build fails.
 
 If sourcing the workspace reports a missing package setup file (for example,
 `rplidar_ros/local_setup.bash`), that is a separate stale-install problem. Do
-not ignore it: rebuild that package if it is present in `src`, or remove its
-stale install entry before running an experiment.
+not ignore it. If `colcon list` shows that package, rebuild it to repair the
+links created by `--symlink-install`:
+
+```bash
+colcon build \
+  --packages-select rplidar_ros \
+  --symlink-install \
+  --cmake-clean-cache \
+  --cmake-args -DBUILD_TESTING=OFF
+source install/setup.bash
+```
+
+For a temporary Slam Toolbox-only verification under ROS 2 Eloquent, its
+package-specific script is located under the package's `share` directory:
+
+```bash
+source /opt/ros/eloquent/setup.bash
+source install/slam_toolbox/share/slam_toolbox/local_setup.bash
+ros2 pkg prefix slam_toolbox
+```
 
 ## 3. Stationary smoke test
 
