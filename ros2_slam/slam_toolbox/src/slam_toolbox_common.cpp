@@ -145,10 +145,12 @@ void SlamToolbox::setParams()
   scan_distance_gate_mode_ = this->declare_parameter(
     "scan_distance_gate_mode", scan_distance_gate_mode_);
   if (scan_distance_gate_mode_ != "legacy" &&
-    scan_distance_gate_mode_ != "euclidean")
+    scan_distance_gate_mode_ != "euclidean" &&
+    scan_distance_gate_mode_ != "euclidean_heading")
   {
     RCLCPP_FATAL(get_logger(),
-      "scan_distance_gate_mode must be 'legacy' or 'euclidean', got '%s'",
+      "scan_distance_gate_mode must be 'legacy', 'euclidean', or "
+      "'euclidean_heading', got '%s'",
       scan_distance_gate_mode_.c_str());
     exit(1);
   }
@@ -513,21 +515,48 @@ bool SlamToolbox::shouldProcessScan(
   // baseline and the one-variable correction can be run from the same build.
   const double dx = last_pose.GetX() - pose.GetX();
   const double dy = last_pose.GetY() - pose.GetY();
+  const double heading_delta = fabs(math::NormalizeAngle(
+      pose.GetHeading() - last_pose.GetHeading()));
+  const double min_heading = math::DegreesToRadians(
+    smapper_->getMapper()->getParamMinimumTravelHeading());
   double dist2 = 0.0;
-  if (scan_distance_gate_mode_ == "euclidean") {
+  double distance_threshold = 0.8 * min_dist2;
+  bool translation_pass = false;
+  bool heading_pass = false;
+
+  if (scan_distance_gate_mode_ == "euclidean_heading") {
+    // Match Karto's downstream HasMovedEnough rule exactly.  The historical
+    // wrapper used 0.8 * min_dist2, updated last_pose, and then handed the
+    // scan to Karto, which rejected it against the full min_dist2 threshold.
+    // Re-anchoring the wrapper on that rejected scan nearly doubled the
+    // effective spacing between scans that reached the pose graph.
     dist2 = dx * dx + dy * dy;
+    distance_threshold = min_dist2 - KT_TOLERANCE;
+    translation_pass = dist2 >= distance_threshold;
+    heading_pass = heading_delta >= min_heading;
+  } else if (scan_distance_gate_mode_ == "euclidean") {
+    // Preserve the first corrected experiment exactly for reproducibility.
+    dist2 = dx * dx + dy * dy;
+    translation_pass = dist2 >= distance_threshold;
   } else {
+    // Preserve the original Eloquent coordinate-dependent expression.
     dist2 = fabs(dx * dx + dy * (last_pose.GetX() - pose.GetY()));
+    translation_pass = dist2 >= distance_threshold;
   }
-  if (dist2 < 0.8 * min_dist2 || scan_ctr < 5) {
+
+  if ((!translation_pass && !heading_pass) || scan_ctr < 5) {
     return false;
   }
 
+  const char * accept_reason = heading_pass && !translation_pass ?
+    "heading" : (heading_pass ? "distance+heading" : "distance");
+
   RCLCPP_INFO(get_logger(),
     "SCAN_GATE_ACCEPT mode=%s pose=(%.6f,%.6f) delta=(%.6f,%.6f) "
-    "dist2=%.6f threshold=%.6f",
+    "heading_delta=%.6f dist2=%.6f distance_threshold=%.6f "
+    "heading_threshold=%.6f reason=%s",
     scan_distance_gate_mode_.c_str(), pose.GetX(), pose.GetY(), dx, dy,
-    dist2, 0.8 * min_dist2);
+    heading_delta, dist2, distance_threshold, min_heading, accept_reason);
 
   last_pose = pose;
   last_scan_time = scan->header.stamp;

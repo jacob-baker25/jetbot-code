@@ -17,7 +17,8 @@ def generate_launch_description():
     declare_scan_distance_gate_mode_argument = DeclareLaunchArgument(
         'scan_distance_gate_mode',
         default_value='legacy',
-        description='Scan distance gate: legacy or euclidean')
+        description=(
+            'Scan gate: legacy, euclidean, or euclidean_heading'))
 
     start_sync_slam_toolbox_node = Node(
         parameters=[

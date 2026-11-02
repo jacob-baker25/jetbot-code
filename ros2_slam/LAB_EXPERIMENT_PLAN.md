@@ -1,26 +1,21 @@
-# Scan-gate diagnostic experiment
+# Next JetBot lab session
 
-This experiment compares the original Eloquent Slam Toolbox scan-distance gate
-with the corrected Euclidean distance calculation. Both modes use the same
-compiled binary; only the launch parameter changes.
+The legacy-versus-Euclidean diagnostic phase is complete. The analysis and
+rationale for the next candidate are in `POST_EXPERIMENT_ANALYSIS.md`. This file
+is the short operational checklist.
 
-## 1. Pull and deploy on the Jetson
+## 1. Deploy and build
+
+On the Jetson:
 
 ```bash
 cd ~/jetbot-code
 git fetch origin
-git switch experiment/scan-gate-diagnostics
+git checkout experiment/scan-gate-diagnostics
 git pull --ff-only
 
 bash ros2_slam/deploy_scan_gate_diagnostics.sh
-```
 
-The deployment script copies only the six diagnostic files and saves the old
-Jetson versions under `~/autochair_ros2_ws/backups/`.
-
-## 2. Build
-
-```bash
 cd ~/autochair_ros2_ws
 source /opt/ros/eloquent/setup.bash
 colcon build \
@@ -28,87 +23,77 @@ colcon build \
   --symlink-install \
   --cmake-clean-cache \
   --cmake-args -DBUILD_TESTING=OFF
-source install/setup.bash
 ```
 
-The JetBot deployment does not need the Slam Toolbox unit-test executables.
-Disabling them also avoids linking the workspace's cached GoogleTest archive on
-the Jetson. Do not source the workspace or proceed if the build fails.
+Do not continue if the build fails.
 
-If sourcing the workspace reports a missing package setup file (for example,
-`rplidar_ros/local_setup.bash`), that is a separate stale-install problem. Do
-not ignore it. If `colcon list` shows that package, rebuild it to repair the
-links created by `--symlink-install`:
-
-```bash
-colcon build \
-  --packages-select rplidar_ros \
-  --symlink-install \
-  --cmake-clean-cache \
-  --cmake-args -DBUILD_TESTING=OFF
-source install/setup.bash
-```
-
-For a temporary Slam Toolbox-only verification under ROS 2 Eloquent, its
-package-specific script is located under the package's `share` directory:
+Verify the package-specific overlay:
 
 ```bash
 source /opt/ros/eloquent/setup.bash
-source install/slam_toolbox/share/slam_toolbox/local_setup.bash
+source ~/autochair_ros2_ws/install/slam_toolbox/share/slam_toolbox/local_setup.bash
 ros2 pkg prefix slam_toolbox
 ```
 
-## 3. Stationary smoke test
+The prefix must be under `~/autochair_ros2_ws/install/slam_toolbox`.
 
-With the JetBot safely supported or placed where it cannot drive unexpectedly,
-run the mapping session and allow its synchronization and stationary checks to
-complete. Stop before commanding motion if anything fails.
+## 2. Prepare ground truth
+
+- Tape the starting axle center and starting heading.
+- Tape 3 ft, 6 ft, 9 ft, and turn positions.
+- Use the same route and speed for both runs.
+- Record final longitudinal, lateral, and heading offsets from the tape marks.
+- Keep the hallway static during each run.
+
+## 3. Run the candidate twice
 
 ```bash
 cd ~/autochair_ros2_ws/local_nodes
-python3 mapping_session.py stationary_gate_smoke legacy
+python3 mapping_session.py elbow_heading_01 euclidean_heading
 ```
 
-Confirm `slam.log` contains:
+Return exactly to the tape marks, then run:
+
+```bash
+python3 mapping_session.py elbow_heading_02 euclidean_heading
+```
+
+For each run, verify the startup output says:
 
 ```text
-Scan distance gate mode: legacy
+Requested mode: euclidean_heading
+Runtime mode:   euclidean_heading
+RESULT: PASS
 ```
 
-Finish the session normally so its files are flushed.
+Use `N` for named checkpoints at 3 ft, 6 ft, before/after every turn, the far
+end, the return corner, and the original position. Press `Q` after aligning at
+the taped final pose.
 
-## 4. Experiment A: instrumented legacy baseline
+## 4. Package and copy results
+
+On the Jetson:
 
 ```bash
-python3 mapping_session.py elbow_instrumented_legacy_01 legacy
+cd ~/autochair_ros2_ws/experiments
+tar -czf elbow_heading_runs_$(date +%Y%m%d).tar.gz elbow_heading_01_* elbow_heading_02_*
 ```
 
-Use the same marked start pose, turn locations, speed, pauses, and route used in
-the previous elbow experiments. Capture named checkpoints at the start, each
-meter, immediately before and after each turn, the far end, the return corner,
-and the final pose.
+On the Windows laptop, avoid a quoted path ending in a backslash. Use the full
+destination filename:
 
-## 5. Experiment B: corrected Euclidean gate
-
-Restart the complete stack through a new mapping session, return the robot to
-the same marked start pose, and run:
-
-```bash
-python3 mapping_session.py elbow_euclidean_gate_01 euclidean
+```powershell
+scp jetbot@100.86.57.31:/home/jetbot/autochair_ros2_ws/experiments/elbow_heading_runs_20261102.tar.gz `
+  "C:\Senior Year\Senior Design\jetbot_analysis\experiments\elbow_heading_runs_20261102.tar.gz"
 ```
 
-Change no other source, parameter, driving speed, or route detail.
+Change the date in both places if the run is performed on a later day.
 
-## 6. Required artifacts
+## 5. Stop/go checks
 
-Each experiment directory should contain the existing maps and logs plus:
-
-- `trajectory.csv`: 10 Hz RF2O, SLAM, and `map -> odom` trajectory
-- `slam.log` lines beginning with `SCAN_GATE_ACCEPT`
-- `slam.log` lines beginning with `KARTO_SEQ_MATCH`
-- `slam.log` lines beginning with `KARTO_SCAN_FINAL`
-- any accepted closure as `KARTO_LOOP_ACCEPT`
-- `results.json` with `scan_distance_gate_mode`
-
-Do not change the odometry penalty or loop-closure setting until these two runs
-have been compared.
+- If gate mode, synchronization, or stationary preflight fails, do not drive.
+- If both candidate runs have fewer than 15 `KARTO_SCAN_FINAL` lines, do not
+  tune loop thresholds.
+- If the graph is dense enough but walls remain duplicated, do one controlled
+  run with a rigid asymmetric LiDAR-visible landmark at the elbow.
+- Keep legacy and the original Euclidean mode unchanged as historical controls.
