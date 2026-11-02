@@ -223,6 +223,7 @@ class MappingSession(Node):
 
         self.processes = []
         self.log_files = []
+        self.process_log_paths = {}
 
         self.trajectory_sample_count = 0
         self.trajectory_path = os.path.join(
@@ -574,6 +575,10 @@ class MappingSession(Node):
             log_file
         )
 
+        self.process_log_paths[name] = (
+            log_path
+        )
+
         shell_command = (
             "source /opt/ros/eloquent/setup.bash && "
             "source {}/install/setup.bash "
@@ -627,6 +632,94 @@ class MappingSession(Node):
                 )
 
         return False
+
+
+    def verify_slam_gate_mode(self):
+
+        print()
+        print("=" * 70)
+        print("SLAM GATE MODE CHECK")
+        print("=" * 70)
+
+        log_path = self.process_log_paths.get(
+            "slam"
+        )
+
+        deadline = time.monotonic() + 5.0
+        marker = "Scan distance gate mode:"
+        actual_mode = None
+
+        while time.monotonic() < deadline:
+
+            try:
+
+                with open(
+                    log_path,
+                    "r",
+                    errors="replace"
+                ) as log_file:
+
+                    for line in log_file:
+
+                        if marker in line:
+
+                            value = line.split(
+                                marker,
+                                1
+                            )[1].strip()
+
+                            if value:
+                                actual_mode = (
+                                    value.split()[0]
+                                )
+
+            except (IOError, OSError, TypeError):
+                pass
+
+            if actual_mode is not None:
+                break
+
+            rclpy.spin_once(
+                self,
+                timeout_sec=0.1
+            )
+
+        print(
+            "Requested mode: {}".format(
+                self.scan_distance_gate_mode
+            )
+        )
+
+        print(
+            "Runtime mode:   {}".format(
+                actual_mode
+                if actual_mode is not None
+                else "unavailable"
+            )
+        )
+
+        passed = (
+            actual_mode
+            ==
+            self.scan_distance_gate_mode
+        )
+
+        print(
+            "RESULT: {}".format(
+                "PASS" if passed else "FAIL"
+            )
+        )
+        print("=" * 70)
+        print()
+
+        if not passed:
+
+            print(
+                "Requested SLAM gate mode does not "
+                "match the running node."
+            )
+
+        return passed
 
 
     def start_stack(self):
@@ -2559,6 +2652,12 @@ class MappingSession(Node):
             self.stop_stack()
 
             return 1
+
+        if not self.verify_slam_gate_mode():
+
+            self.stop_stack()
+
+            return 5
 
         print(
             (

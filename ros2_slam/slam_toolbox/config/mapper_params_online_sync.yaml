@@ -15,8 +15,8 @@ slam_toolbox:
     base_frame: base_link
     scan_topic: /scan_slam
     # Experiment control: "legacy" reproduces the original Eloquent gate;
-    # "euclidean" uses dx^2 + dy^2. Change only through the launch argument.
-    scan_distance_gate_mode: legacy
+    # "euclidean" uses dx^2 + dy^2. The launch argument supplies this value;
+    # do not duplicate it here because Eloquent may let this file override it.
     mode: mapping #localization
 
     # if you'd like to immediately start continuing a map at a given pose
