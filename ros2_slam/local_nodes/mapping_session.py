@@ -11,6 +11,7 @@ import sys
 import termios
 import time
 import tty
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
@@ -84,6 +85,8 @@ INITIAL_SETTLE_SECONDS = 5.0
 
 SCAN_TF_TEST_COUNT = 20
 SCAN_TF_MIN_SUCCESS_RATE = 0.90
+SCAN_TF_MAX_ATTEMPTS = 60
+SCAN_TF_TIMEOUT_SECONDS = 15.0
 
 STATIONARY_TEST_SECONDS = 5.0
 
@@ -207,6 +210,12 @@ class MappingSession(Node):
         )
 
         self.session_end_unix = None
+        self.run_status = "created"
+        self.runtime_gate_mode = None
+        self.preflight_results = {
+            "scan_tf": None,
+            "stationary": None,
+        }
 
         self.robot = Robot()
 
@@ -223,6 +232,7 @@ class MappingSession(Node):
 
         self.processes = []
         self.log_files = []
+        self.process_log_paths = {}
 
         self.trajectory_sample_count = 0
         self.trajectory_path = os.path.join(
@@ -286,6 +296,9 @@ class MappingSession(Node):
         self.scan_tf_test_count = 0
         self.scan_tf_test_success = 0
         self.scan_tf_test_fail = 0
+        self.scan_tf_recent_results = deque(
+            maxlen=SCAN_TF_TEST_COUNT
+        )
 
         # --------------------------------------------
         # Subscribers
@@ -363,11 +376,7 @@ class MappingSession(Node):
         if not self.scan_tf_test_active:
             return
 
-        if (
-            self.scan_tf_test_count
-            >=
-            SCAN_TF_TEST_COUNT
-        ):
+        if self.scan_tf_test_count >= SCAN_TF_MAX_ATTEMPTS:
             return
 
         self.scan_tf_test_count += 1
@@ -376,6 +385,8 @@ class MappingSession(Node):
             seconds=msg.header.stamp.sec,
             nanoseconds=msg.header.stamp.nanosec
         )
+
+        success = False
 
         try:
 
@@ -386,10 +397,15 @@ class MappingSession(Node):
             )
 
             self.scan_tf_test_success += 1
+            success = True
 
         except Exception:
 
             self.scan_tf_test_fail += 1
+
+        self.scan_tf_recent_results.append(
+            success
+        )
 
 
     def record_trajectory_sample(self):
@@ -574,6 +590,10 @@ class MappingSession(Node):
             log_file
         )
 
+        self.process_log_paths[name] = (
+            log_path
+        )
+
         shell_command = (
             "source /opt/ros/eloquent/setup.bash && "
             "source {}/install/setup.bash "
@@ -627,6 +647,96 @@ class MappingSession(Node):
                 )
 
         return False
+
+
+    def verify_slam_gate_mode(self):
+
+        print()
+        print("=" * 70)
+        print("SLAM GATE MODE CHECK")
+        print("=" * 70)
+
+        log_path = self.process_log_paths.get(
+            "slam"
+        )
+
+        deadline = time.monotonic() + 5.0
+        marker = "Scan distance gate mode:"
+        actual_mode = None
+
+        while time.monotonic() < deadline:
+
+            try:
+
+                with open(
+                    log_path,
+                    "r",
+                    errors="replace"
+                ) as log_file:
+
+                    for line in log_file:
+
+                        if marker in line:
+
+                            value = line.split(
+                                marker,
+                                1
+                            )[1].strip()
+
+                            if value:
+                                actual_mode = (
+                                    value.split()[0]
+                                )
+
+            except (IOError, OSError, TypeError):
+                pass
+
+            if actual_mode is not None:
+                break
+
+            rclpy.spin_once(
+                self,
+                timeout_sec=0.1
+            )
+
+        print(
+            "Requested mode: {}".format(
+                self.scan_distance_gate_mode
+            )
+        )
+
+        print(
+            "Runtime mode:   {}".format(
+                actual_mode
+                if actual_mode is not None
+                else "unavailable"
+            )
+        )
+
+        passed = (
+            actual_mode
+            ==
+            self.scan_distance_gate_mode
+        )
+
+        self.runtime_gate_mode = actual_mode
+
+        print(
+            "RESULT: {}".format(
+                "PASS" if passed else "FAIL"
+            )
+        )
+        print("=" * 70)
+        print()
+
+        if not passed:
+
+            print(
+                "Requested SLAM gate mode does not "
+                "match the running node."
+            )
+
+        return passed
 
 
     def start_stack(self):
@@ -1043,17 +1153,19 @@ class MappingSession(Node):
         self.scan_tf_test_count = 0
         self.scan_tf_test_success = 0
         self.scan_tf_test_fail = 0
+        self.scan_tf_recent_results.clear()
 
         self.scan_tf_test_active = True
 
         start = time.monotonic()
+        passed = False
 
         while (
             rclpy.ok()
             and
             self.scan_tf_test_count
             <
-            SCAN_TF_TEST_COUNT
+            SCAN_TF_MAX_ATTEMPTS
         ):
 
             rclpy.spin_once(
@@ -1061,13 +1173,23 @@ class MappingSession(Node):
                 timeout_sec=0.1
             )
 
-            if (
-                time.monotonic()
-                -
-                start
-                >
-                10.0
-            ):
+            if len(self.scan_tf_recent_results) >= SCAN_TF_TEST_COUNT:
+
+                recent_success = sum(
+                    1 for value in self.scan_tf_recent_results if value
+                )
+
+                recent_rate = (
+                    float(recent_success)
+                    /
+                    float(SCAN_TF_TEST_COUNT)
+                )
+
+                if recent_rate >= SCAN_TF_MIN_SUCCESS_RATE:
+                    passed = True
+                    break
+
+            if time.monotonic() - start > SCAN_TF_TIMEOUT_SECONDS:
 
                 break
 
@@ -1097,8 +1219,22 @@ class MappingSession(Node):
 
             rate = 0.0
 
+        recent_total = len(
+            self.scan_tf_recent_results
+        )
+
+        recent_success = sum(
+            1 for value in self.scan_tf_recent_results if value
+        )
+
+        recent_rate = (
+            float(recent_success) / float(recent_total)
+            if recent_total > 0
+            else 0.0
+        )
+
         print(
-            "Delayed scans tested: {}".format(
+            "Delayed scans attempted: {}".format(
                 total
             )
         )
@@ -1116,20 +1252,30 @@ class MappingSession(Node):
         )
 
         print(
-            "Success rate:        {:.1f}%".format(
+            "Overall success:     {:.1f}%".format(
                 rate * 100.0
             )
         )
 
-        passed = (
-            total
-            >=
-            SCAN_TF_TEST_COUNT
-            and
-            rate
-            >=
-            SCAN_TF_MIN_SUCCESS_RATE
+        print(
+            "Latest {} scans:      {}/{} ({:.1f}%)".format(
+                recent_total,
+                recent_success,
+                recent_total,
+                recent_rate * 100.0
+            )
         )
+
+        self.preflight_results["scan_tf"] = {
+            "passed": passed,
+            "attempts": total,
+            "successes": success,
+            "failures": failed,
+            "overall_success_rate": rate,
+            "window_size": recent_total,
+            "window_successes": recent_success,
+            "window_success_rate": recent_rate,
+        }
 
         if passed:
 
@@ -1199,6 +1345,11 @@ class MappingSession(Node):
 
         if start is None:
 
+            self.preflight_results["stationary"] = {
+                "passed": False,
+                "reason": "pose_unavailable_at_start",
+            }
+
             print(
                 "RESULT: FAIL — pose unavailable."
             )
@@ -1217,6 +1368,11 @@ class MappingSession(Node):
         )
 
         if end is None:
+
+            self.preflight_results["stationary"] = {
+                "passed": False,
+                "reason": "pose_unavailable_at_end",
+            }
 
             print(
                 "RESULT: FAIL — pose unavailable."
@@ -1310,6 +1466,15 @@ class MappingSession(Node):
             <=
             MAX_STATIONARY_SLAM_HEADING_DEG,
         ])
+
+        self.preflight_results["stationary"] = {
+            "passed": passed,
+            "duration_s": STATIONARY_TEST_SECONDS,
+            "rf2o_distance_m": rf2o_distance,
+            "rf2o_heading_deg": rf2o_heading,
+            "slam_distance_m": slam_distance,
+            "slam_heading_deg": slam_heading,
+        }
 
         if passed:
 
@@ -1941,6 +2106,12 @@ class MappingSession(Node):
                 self.session_end_unix
             ),
 
+            "run_status": self.run_status,
+
+            "runtime_gate_mode": self.runtime_gate_mode,
+
+            "preflight": self.preflight_results,
+
             "configuration": {
                 "drive_speed": (
                     self.speed
@@ -2550,15 +2721,32 @@ class MappingSession(Node):
                 "Experiment not started."
             )
 
+            self.run_status = "failed_existing_processes"
+            self.session_end_unix = time.time()
+            self.write_results()
             return 2
 
+        self.run_status = "stack_starting"
+        self.write_results()
         self.start_stack()
 
         if not self.wait_for_system():
 
+            self.run_status = "failed_system_ready"
+            self.session_end_unix = time.time()
+            self.write_results()
             self.stop_stack()
 
             return 1
+
+        if not self.verify_slam_gate_mode():
+
+            self.run_status = "failed_gate_mode"
+            self.session_end_unix = time.time()
+            self.write_results()
+            self.stop_stack()
+
+            return 5
 
         print(
             (
@@ -2583,6 +2771,9 @@ class MappingSession(Node):
                 "Scan/TF synchronization failed."
             )
 
+            self.run_status = "failed_scan_tf_preflight"
+            self.session_end_unix = time.time()
+            self.write_results()
             self.stop_stack()
 
             return 3
@@ -2593,6 +2784,9 @@ class MappingSession(Node):
 
         if not self.run_stationary_preflight():
 
+            self.run_status = "failed_stationary_preflight"
+            self.session_end_unix = time.time()
+            self.write_results()
             self.stop_stack()
 
             return 4
@@ -2601,6 +2795,7 @@ class MappingSession(Node):
         # Official experiment start
         # --------------------------------------------
 
+        self.run_status = "running"
         self.capture_checkpoint(
             "start"
         )
@@ -2627,6 +2822,8 @@ class MappingSession(Node):
         self.session_end_unix = (
             time.time()
         )
+
+        self.run_status = "complete"
 
         self.save_map()
 
@@ -2656,7 +2853,7 @@ def main():
         print(
             "  python3 mapping_session.py "
             "EXPERIMENT_NAME "
-            "[legacy|euclidean]"
+            "[legacy|euclidean|euclidean_heading]"
         )
 
         print()
@@ -2682,12 +2879,14 @@ def main():
 
     if scan_distance_gate_mode not in [
         "legacy",
-        "euclidean"
+        "euclidean",
+        "euclidean_heading"
     ]:
 
         print(
             "Gate mode must be "
-            "'legacy' or 'euclidean'."
+            "'legacy', 'euclidean', or "
+            "'euclidean_heading'."
         )
         sys.exit(1)
 
