@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
 import csv
+import hashlib
 import json
 import math
 import os
 import select
 import signal
+import shlex
+import shutil
 import subprocess
 import sys
 import termios
@@ -30,6 +33,8 @@ from tf2_ros import (
 )
 
 from jetbot import Robot
+from ament_index_python.packages import get_package_share_directory
+from matcher_profiles import PROFILE_FILES, expected_parameters, check_karto_config
 
 
 # ============================================================
@@ -171,7 +176,8 @@ class MappingSession(Node):
     def __init__(
         self,
         experiment_name,
-        scan_distance_gate_mode
+        scan_distance_gate_mode,
+        matcher_profile="baseline"
     ):
 
         super().__init__(
@@ -185,6 +191,8 @@ class MappingSession(Node):
         self.scan_distance_gate_mode = (
             scan_distance_gate_mode
         )
+        self.matcher_profile = matcher_profile
+        self.effective_karto_parameters = {}
 
         self.session_name = (
             "{}_{}".format(
@@ -205,6 +213,17 @@ class MappingSession(Node):
             exist_ok=True
         )
 
+        # Run from an immutable per-session copy of the installed profile.
+        # Missing installation fails before initializing the motor interface.
+        profile_source = os.path.join(
+            get_package_share_directory("slam_toolbox"), "config",
+            PROFILE_FILES[matcher_profile]
+        )
+        self.slam_params_file = os.path.join(self.experiment_dir, "slam_params.yaml")
+        shutil.copyfile(profile_source, self.slam_params_file)
+        with open(self.slam_params_file, "rb") as profile_file:
+            self.slam_params_sha256 = hashlib.sha256(profile_file.read()).hexdigest()
+
         self.session_start_unix = (
             time.time()
         )
@@ -213,6 +232,7 @@ class MappingSession(Node):
         self.run_status = "created"
         self.runtime_gate_mode = None
         self.preflight_results = {
+            "karto_config": None,
             "scan_tf": None,
             "stationary": None,
         }
@@ -739,6 +759,41 @@ class MappingSession(Node):
         return passed
 
 
+    def verify_karto_config(self):
+        print("\n" + "=" * 70)
+        print("KARTO INTERNAL CONFIGURATION CHECK")
+        print("Profile: {}".format(self.matcher_profile))
+        deadline = time.monotonic() + 5.0
+        actual, errors = {}, ["Karto configuration log unavailable"]
+        while time.monotonic() < deadline:
+            try:
+                with open(self.process_log_paths["slam"], "r", errors="replace") as stream:
+                    actual, errors = check_karto_config(stream.read(), self.matcher_profile)
+            except (IOError, OSError, KeyError):
+                pass
+            if len(actual) == len(expected_parameters(self.matcher_profile)):
+                break
+            rclpy.spin_once(self, timeout_sec=0.1)
+        self.effective_karto_parameters = actual
+        passed = not errors
+        self.preflight_results["karto_config"] = {
+            "passed": passed, "profile": self.matcher_profile, "errors": errors,
+            "expected": expected_parameters(self.matcher_profile), "actual": actual,
+        }
+        for name in ("correlation_search_space_dimension", "distance_variance_penalty",
+                     "minimum_distance_penalty"):
+            print("{}: {}".format(name, actual.get(name, "unavailable")))
+        print("Verified parameters: {}/{}".format(
+            len(actual), len(expected_parameters(self.matcher_profile))))
+        for error in errors:
+            print("  " + error)
+        print("RESULT: {}".format("PASS" if passed else "FAIL"))
+        print("=" * 70 + "\n")
+        if not passed:
+            print("Do not drive. Deploy/rebuild Slam Toolbox and verify the installed profile.")
+        return passed
+
+
     def start_stack(self):
 
         print()
@@ -810,9 +865,11 @@ class MappingSession(Node):
                 "slam_toolbox "
                 "online_sync_launch.py "
                 "use_sim_time:=false "
-                "scan_distance_gate_mode:={}"
+                "scan_distance_gate_mode:={} "
+                "params_file:={}"
             ).format(
-                self.scan_distance_gate_mode
+                self.scan_distance_gate_mode,
+                shlex.quote(self.slam_params_file)
             )
         )
 
@@ -2109,10 +2166,14 @@ class MappingSession(Node):
             "run_status": self.run_status,
 
             "runtime_gate_mode": self.runtime_gate_mode,
+            "effective_karto_parameters": self.effective_karto_parameters,
 
             "preflight": self.preflight_results,
 
             "configuration": {
+                "matcher_profile": self.matcher_profile,
+                "slam_params_file": self.slam_params_file,
+                "slam_params_sha256": self.slam_params_sha256,
                 "drive_speed": (
                     self.speed
                 ),
@@ -2748,6 +2809,13 @@ class MappingSession(Node):
 
             return 5
 
+        if not self.verify_karto_config():
+            self.run_status = "failed_karto_config"
+            self.session_end_unix = time.time()
+            self.write_results()
+            self.stop_stack()
+            return 6
+
         print(
             (
                 "Initial settling for "
@@ -2843,7 +2911,7 @@ class MappingSession(Node):
 
 def main():
 
-    if len(sys.argv) not in [2, 3]:
+    if len(sys.argv) not in [2, 3, 4]:
 
         print()
         print(
@@ -2853,7 +2921,7 @@ def main():
         print(
             "  python3 mapping_session.py "
             "EXPERIMENT_NAME "
-            "[legacy|euclidean|euclidean_heading]"
+            "[legacy|euclidean|euclidean_heading] [baseline|narrow]"
         )
 
         print()
@@ -2874,7 +2942,7 @@ def main():
 
     scan_distance_gate_mode = "legacy"
 
-    if len(sys.argv) == 3:
+    if len(sys.argv) >= 3:
         scan_distance_gate_mode = sys.argv[2]
 
     if scan_distance_gate_mode not in [
@@ -2890,11 +2958,17 @@ def main():
         )
         sys.exit(1)
 
+    matcher_profile = sys.argv[3] if len(sys.argv) == 4 else "baseline"
+    if matcher_profile not in PROFILE_FILES:
+        print("Matcher profile must be 'baseline' or 'narrow'.")
+        sys.exit(1)
+
     rclpy.init()
 
     node = MappingSession(
         experiment_name,
-        scan_distance_gate_mode
+        scan_distance_gate_mode,
+        matcher_profile
     )
 
     exit_code = 1

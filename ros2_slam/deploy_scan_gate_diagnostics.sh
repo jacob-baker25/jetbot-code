@@ -22,10 +22,13 @@ fi
 FILES=(
   "slam_toolbox/include/slam_toolbox/slam_toolbox_common.hpp"
   "slam_toolbox/src/slam_toolbox_common.cpp"
+  "slam_toolbox/src/slam_mapper.cpp"
   "slam_toolbox/lib/karto_sdk/src/Mapper.cpp"
   "slam_toolbox/launch/online_sync_launch.py"
   "slam_toolbox/config/mapper_params_online_sync.yaml"
+  "slam_toolbox/config/mapper_params_online_sync_narrow.yaml"
   "local_nodes/mapping_session.py"
+  "local_nodes/matcher_profiles.py"
 )
 
 mkdir -p "${BACKUP_ROOT}"
