@@ -45,20 +45,27 @@ The prefix must be under `~/autochair_ros2_ws/install/slam_toolbox`.
 - Record final longitudinal, lateral, and heading offsets from the tape marks.
 - Keep the hallway static during each run.
 
-## 3. Run the candidate twice
+## 3. Run the hallway-constrained candidate once
+
+The first `euclidean_heading` run proved that the gate handoff works, but the
+0.5 m correlation search and weak 0.5 distance-variance penalty allowed Karto
+to make 0.26-0.29 m ambiguous corrections along the empty hallway.  This
+candidate restores Karto's conservative translation settings:
+
+```text
+correlation_search_space_dimension: 0.3
+distance_variance_penalty:           0.09
+```
+
+Do not add landmarks or alter the hallway.  The required environment is the
+test environment.  Keep the route, speed, starting pose, and gate unchanged.
 
 ```bash
 cd ~/autochair_ros2_ws/local_nodes
-python3 mapping_session.py elbow_heading_01 euclidean_heading
+python3 mapping_session.py elbow_heading_constrained_01 euclidean_heading
 ```
 
-Return exactly to the tape marks, then run:
-
-```bash
-python3 mapping_session.py elbow_heading_02 euclidean_heading
-```
-
-For each run, verify the startup output says:
+Verify the startup output says:
 
 ```text
 Requested mode: euclidean_heading
@@ -70,21 +77,24 @@ Use `N` for named checkpoints at 3 ft, 6 ft, before/after every turn, the far
 end, the return corner, and the original position. Press `Q` after aligning at
 the taped final pose.
 
+Do not run a repetition until the first constrained result has been reviewed.
+
 ## 4. Package and copy results
 
 On the Jetson:
 
 ```bash
 cd ~/autochair_ros2_ws/experiments
-tar -czf elbow_heading_runs_$(date +%Y%m%d).tar.gz elbow_heading_01_* elbow_heading_02_*
+tar -czf elbow_heading_constrained_01_$(date +%Y%m%d).tar.gz \
+  elbow_heading_constrained_01_*
 ```
 
 On the Windows laptop, avoid a quoted path ending in a backslash. Use the full
 destination filename:
 
 ```powershell
-scp jetbot@100.86.57.31:/home/jetbot/autochair_ros2_ws/experiments/elbow_heading_runs_20261102.tar.gz `
-  "C:\Senior Year\Senior Design\jetbot_analysis\experiments\elbow_heading_runs_20261102.tar.gz"
+scp jetbot@100.86.57.31:/home/jetbot/autochair_ros2_ws/experiments/elbow_heading_constrained_01_20261104.tar.gz `
+  "C:\Senior Year\Senior Design\jetbot_analysis\experiments\elbow_heading_constrained_01_20261104.tar.gz"
 ```
 
 Change the date in both places if the run is performed on a later day.
@@ -92,8 +102,8 @@ Change the date in both places if the run is performed on a later day.
 ## 5. Stop/go checks
 
 - If gate mode, synchronization, or stationary preflight fails, do not drive.
-- If both candidate runs have fewer than 15 `KARTO_SCAN_FINAL` lines, do not
-  tune loop thresholds.
-- If the graph is dense enough but walls remain duplicated, do one controlled
-  run with a rigid asymmetric LiDAR-visible landmark at the elbow.
+- If the candidate has fewer than 15 `KARTO_SCAN_FINAL` lines, do not tune loop
+  thresholds.
+- If large low-confidence corrections remain, add response/covariance-based
+  fallback to RF2O; do not alter the required hallway to make matching easier.
 - Keep legacy and the original Euclidean mode unchanged as historical controls.
