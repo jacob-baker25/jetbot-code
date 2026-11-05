@@ -288,6 +288,10 @@ class MappingSession(Node):
             "slam_minus_rf2o_x_m",
             "slam_minus_rf2o_y_m",
             "slam_minus_rf2o_yaw_deg",
+            "slam_tf_stamp_s",
+            "slam_tf_age_s",
+            "map_to_odom_tf_stamp_s",
+            "rf2o_age_s",
         ])
 
         self.stack_stopped = False
@@ -472,6 +476,10 @@ class MappingSession(Node):
                 -
                 rf2o["yaw_deg"]
             ),
+            slam["stamp_s"],
+            slam["age_s"],
+            map_to_odom["stamp_s"],
+            self.get_clock().now().nanoseconds / 1e9 - rf2o["stamp_s"],
         ])
 
         self.trajectory_sample_count += 1
@@ -1029,7 +1037,14 @@ class MappingSession(Node):
             "y": float(t.y),
             "yaw_deg": float(
                 math.degrees(yaw)
-            )
+            ),
+            # Preserve the TF time: latest RF2O and latest map->base need
+            # not describe the same instant. Do not silently time-align them.
+            "stamp_s": (transform.header.stamp.sec
+                        + transform.header.stamp.nanosec / 1e9),
+            "age_s": (self.get_clock().now().nanoseconds / 1e9
+                      - transform.header.stamp.sec
+                      - transform.header.stamp.nanosec / 1e9),
         }
 
 
