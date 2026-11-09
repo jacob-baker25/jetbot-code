@@ -19,6 +19,19 @@ from summarize_capture import summarize
 
 
 class CaptureTest(unittest.TestCase):
+    def test_zeroing_waits_without_closing_sensor(self):
+        import sys
+        with mock.patch.dict(sys.modules, {'capture_sensors':capture}):
+            spec = importlib.util.spec_from_file_location('probe',str(ROOT/'local_nodes/phidget_probe.py'))
+            probe = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(probe)
+        events=[]
+        device=mock.Mock()
+        device.zeroGyro.side_effect=lambda:events.append('zero')
+        probe.zero_before_capture(device,lambda seconds:events.append(seconds))
+        self.assertEqual(events,['zero',3.0])
+        device.close.assert_not_called()
+
     def test_python_deployment_preserves_previous_files(self):
         bash = ('C:/Program Files/Git/bin/bash.exe' if os.name == 'nt'
                 else shutil.which('bash'))

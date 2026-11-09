@@ -18,6 +18,8 @@ def main():
     parser.add_argument('--seconds', type=float, default=60)
     parser.add_argument('--interval-ms', type=int, default=20)
     parser.add_argument('--serial', type=int)
+    parser.add_argument('--zero-gyro', action='store_true',
+                        help='Keep sensor still: zero gyro before recording in this same session')
     args = parser.parse_args()
     if not math.isfinite(args.seconds) or not 0 < args.seconds <= 1200:
         parser.error('--seconds must be in (0, 1200]')
@@ -33,6 +35,7 @@ def main():
     def on_data(device, acceleration, angular_rate, magnetic_field, timestamp):
         record = {'topic': 'phidget_raw', 'receipt_unix_s': time.time(),
                   'elapsed_s': time.monotonic() - start,
+                  'gyro_zeroed_before_capture': args.zero_gyro,
                   'msg': {'device_timestamp_ms': timestamp,
                           'acceleration_g': list(acceleration),
                           'angular_rate_deg_s': list(angular_rate),
@@ -48,13 +51,18 @@ def main():
     try:
         if args.serial is not None:
             spatial.setDeviceSerialNumber(args.serial)
-        spatial.setOnSpatialDataHandler(on_data)
         spatial.setOnErrorHandler(on_error)
         spatial.openWaitForAttachment(10000)
         spatial.setDataInterval(args.interval_ms)
         print('Attached serial {}. Interval {} ms. Raw units: g, deg/s, gauss.'.format(
             spatial.getDeviceSerialNumber(), spatial.getDataInterval()), flush=True)
+        if args.zero_gyro:
+            print('Keep completely stationary: zeroing gyro; waiting 3 seconds.', flush=True)
+            zero_before_capture(spatial)
         start = time.monotonic()
+        # Subscribe after zeroing so calibration samples cannot enter the capture.
+        spatial.setOnSpatialDataHandler(on_data)
+        print('Recording now. Keep still for a stationary test.', flush=True)
         last_sample = start
         next_report = start + 5
         while time.monotonic() - start < args.seconds:
@@ -86,6 +94,11 @@ def plain_record(record):
     # plain() operates on ROS messages/sequences, so dictionaries recurse here.
     return {key: plain_record(value) if isinstance(value, dict) else plain(value)
             for key, value in record.items()}
+
+
+def zero_before_capture(spatial, wait=time.sleep):
+    spatial.zeroGyro()
+    wait(3.0)
 
 
 if __name__ == '__main__':
