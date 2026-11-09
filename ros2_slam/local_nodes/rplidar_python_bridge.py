@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import math
 import time
 
 import rclpy
@@ -9,11 +8,16 @@ from sensor_msgs.msg import LaserScan
 
 from rplidar import RPLidar, RPLidarException
 
+from lidar_scan_geometry import (
+    NUM_BINS,
+    laser_scan_angles,
+    ros_bin_for_hardware_angle,
+)
+
 
 PORT = '/dev/ttyUSB0'
 BAUDRATE = 256000
 
-NUM_BINS = 360
 RANGE_MIN_M = 0.15
 RANGE_MAX_M = 12.0
 
@@ -45,6 +49,9 @@ class RPLidarBridge(Node):
         )
         self.get_logger().info(
             'RPLidar health: {}'.format(health)
+        )
+        self.get_logger().info(
+            'Angle conversion: hardware clockwise -> ROS counterclockwise'
         )
 
         self.last_scan_time = time.time()
@@ -88,7 +95,7 @@ class RPLidarBridge(Node):
         intensities = [0.0] * NUM_BINS
 
         for quality, angle_deg, distance_mm in scan:
-            index = int(angle_deg) % NUM_BINS
+            index = ros_bin_for_hardware_angle(angle_deg)
             distance_m = distance_mm / 1000.0
 
             if RANGE_MIN_M <= distance_m <= RANGE_MAX_M:
@@ -100,9 +107,10 @@ class RPLidarBridge(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'laser_frame'
 
-        msg.angle_min = 0.0
-        msg.angle_max = 2.0 * math.pi
-        msg.angle_increment = (2.0 * math.pi) / NUM_BINS
+        angle_min, angle_max, angle_increment = laser_scan_angles()
+        msg.angle_min = angle_min
+        msg.angle_max = angle_max
+        msg.angle_increment = angle_increment
 
         msg.scan_time = float(scan_time)
         msg.time_increment = float(scan_time / NUM_BINS)

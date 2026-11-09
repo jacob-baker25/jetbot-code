@@ -62,6 +62,7 @@ LASER_FRAME = "laser_frame"
 
 LASER_Z = 0.1778
 LASER_YAW = 3.14159265
+LIDAR_ANGLE_CONVENTION = "hardware_clockwise_to_ros_counterclockwise"
 
 
 # ============================================================
@@ -2208,6 +2209,12 @@ class MappingSession(Node):
                 "laser_yaw_rad": (
                     LASER_YAW
                 ),
+
+                "lidar_angle_convention": (
+                    LIDAR_ANGLE_CONVENTION
+                ),
+
+                "lidar_scan_bins": 360,
 
                 "slam_scan_topic": (
                     "/scan_slam"
