@@ -1,6 +1,9 @@
 import ast
 import importlib.util
 import math
+import contextlib
+import io
+import types
 from pathlib import Path
 import unittest
 
@@ -84,6 +87,37 @@ class ImuYawOdometryTest(unittest.TestCase):
         self.assertIn("odom_topic:=/odom_rf2o_raw", text)
         self.assertIn("publish_tf:=false", text)
         self.assertIn("imu_yaw_odometry.py", text)
+
+    def test_session_verifies_live_odom_messages_not_buffered_log_text(self):
+        tree = ast.parse(SESSION.read_text(encoding="utf-8"))
+        cls = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                   and node.name == "MappingSession")
+        method = next(node for node in cls.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "verify_odom_source")
+        module = ast.Module(body=[method], type_ignores=[])
+        session = types.SimpleNamespace(
+            odom_mode="imu_yaw",
+            odom_message_count=0,
+            last_odom={"stamp_s": 9.9},
+            preflight_results={},
+            require_processes_alive=lambda: None,
+            get_clock=lambda: types.SimpleNamespace(
+                now=lambda: types.SimpleNamespace(nanoseconds=10000000000)
+            ),
+        )
+        def spin_once(owner, timeout_sec):
+            owner.odom_message_count += 1
+        namespace = {
+            "time": types.SimpleNamespace(monotonic=lambda: 0.0),
+            "rclpy": types.SimpleNamespace(spin_once=spin_once),
+        }
+        exec(compile(ast.fix_missing_locations(module), "odom_check", "exec"), namespace)
+        with contextlib.redirect_stdout(io.StringIO()):
+            passed = namespace["verify_odom_source"](session)
+        self.assertTrue(passed)
+        result = session.preflight_results["odom_source"]
+        self.assertEqual(result["new_messages_observed"], 5)
+        self.assertNotIn("marker", result)
 
     def test_python36_syntax(self):
         for path in (CORE, NODE, SESSION):

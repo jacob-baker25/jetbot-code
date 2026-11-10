@@ -267,6 +267,7 @@ class MappingSession(Node):
         self.last_motor_command = 0.0
 
         self.last_odom = None
+        self.odom_message_count = 0
         self.last_map = None
 
         self.checkpoints = []
@@ -381,6 +382,8 @@ class MappingSession(Node):
     # ========================================================
 
     def odom_callback(self, msg):
+
+        self.odom_message_count += 1
 
         q = msg.pose.pose.orientation
 
@@ -724,33 +727,38 @@ class MappingSession(Node):
 
     def verify_odom_source(self):
 
-        passed = True
-        marker = None
+        passed = False
         errors = []
-
-        if self.odom_mode == "imu_yaw":
-            marker = "IMU_YAW_ODOM_READY"
-            log_path = self.process_log_paths.get("imu_yaw_odom")
-            deadline = time.monotonic() + 5.0
-            found = False
-            while time.monotonic() < deadline:
-                try:
-                    with open(log_path, "r", errors="replace") as stream:
-                        found = marker in stream.read()
-                except (IOError, OSError, TypeError):
-                    pass
-                if found:
-                    break
-                self.require_processes_alive()
-                rclpy.spin_once(self, timeout_sec=0.1)
-            passed = found
-            if not found:
-                errors.append("IMU yaw odometry readiness marker unavailable")
+        initial_count = self.odom_message_count
+        deadline = time.monotonic() + 3.0
+        required_new_messages = 5
+        while time.monotonic() < deadline:
+            self.require_processes_alive()
+            rclpy.spin_once(self, timeout_sec=0.1)
+            if self.odom_message_count - initial_count >= required_new_messages:
+                break
+        observed = self.odom_message_count - initial_count
+        age_s = None
+        if self.last_odom is not None:
+            age_s = self.get_clock().now().nanoseconds / 1e9 - self.last_odom["stamp_s"]
+        if observed < required_new_messages:
+            errors.append(
+                "Only {} new /odom_rf2o messages in readiness window; need {}".format(
+                    observed, required_new_messages
+                )
+            )
+        if age_s is None or age_s < -0.1 or age_s > 0.5:
+            errors.append("Final /odom_rf2o age outside [-0.1, 0.5] seconds: {}".format(
+                age_s
+            ))
+        passed = not errors
 
         self.preflight_results["odom_source"] = {
             "passed": passed,
             "mode": self.odom_mode,
-            "marker": marker,
+            "new_messages_observed": observed,
+            "required_new_messages": required_new_messages,
+            "final_message_age_s": age_s,
             "errors": errors,
         }
 
