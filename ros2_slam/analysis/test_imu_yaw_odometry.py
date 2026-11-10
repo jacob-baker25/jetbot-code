@@ -55,6 +55,29 @@ class ImuYawOdometryTest(unittest.TestCase):
         _, _, yaw = fusion.update(0.0, 0.0, 0.2, 3.5)
         self.assertAlmostEqual(yaw, 0.7)
 
+    def test_watchdog_allows_bounded_startup_then_arms_strict_stale_gate(self):
+        watchdog = core.StartupAwareWatchdog(
+            0.0, stable_samples=3, startup_timeout_s=20.0,
+            stale_timeout_s=1.0
+        )
+        watchdog.observe(1.0)
+        watchdog.check(5.0)  # A first-sample pause is allowed during startup.
+        watchdog.observe(5.1)
+        watchdog.observe(5.2)
+        self.assertTrue(watchdog.ready)
+        watchdog.check(6.1)
+        with self.assertRaises(core.StreamTimingError):
+            watchdog.check(6.3)
+
+    def test_watchdog_fails_if_stream_never_stabilizes(self):
+        watchdog = core.StartupAwareWatchdog(
+            0.0, stable_samples=3, startup_timeout_s=20.0,
+            stale_timeout_s=1.0
+        )
+        watchdog.observe(2.0)
+        with self.assertRaises(core.StreamTimingError):
+            watchdog.check(20.1)
+
     def test_session_has_explicit_baseline_and_imu_modes(self):
         text = SESSION.read_text(encoding="utf-8")
         self.assertIn('["rf2o", "imu_yaw"]', text)

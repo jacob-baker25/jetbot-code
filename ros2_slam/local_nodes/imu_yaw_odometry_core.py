@@ -9,6 +9,10 @@ class ImuTimingError(RuntimeError):
     pass
 
 
+class StreamTimingError(RuntimeError):
+    pass
+
+
 def wrap_radians(value):
     return (value + math.pi) % (2.0 * math.pi) - math.pi
 
@@ -109,3 +113,35 @@ class PlanarYawFusion:
         self.raw_y = raw_y
         self.raw_yaw = raw_yaw
         return self.fused_x, self.fused_y, wrap_radians(self.fused_yaw)
+
+
+class StartupAwareWatchdog:
+    """Bound startup separately from strict steady-state stream health."""
+
+    def __init__(self, start_s, stable_samples=10, startup_timeout_s=20.0,
+                 stale_timeout_s=1.0):
+        self.start_s = start_s
+        self.stable_samples = stable_samples
+        self.startup_timeout_s = startup_timeout_s
+        self.stale_timeout_s = stale_timeout_s
+        self.samples = 0
+        self.last_sample_s = None
+
+    @property
+    def ready(self):
+        return self.samples >= self.stable_samples
+
+    def observe(self, now_s):
+        self.samples += 1
+        self.last_sample_s = now_s
+
+    def check(self, now_s):
+        if self.ready:
+            if now_s - self.last_sample_s > self.stale_timeout_s:
+                raise StreamTimingError("raw odometry became stale")
+        elif now_s - self.start_s > self.startup_timeout_s:
+            raise StreamTimingError(
+                "raw odometry did not stabilize: {}/{} fused samples".format(
+                    self.samples, self.stable_samples
+                )
+            )

@@ -17,8 +17,10 @@ In `imu_yaw` mode:
 5. Slam Toolbox continues to publish `map -> odom`.
 
 The mode exits on nonfinite/reversed IMU data, an IMU gap over 100 ms, an IMU
-stream stale over 500 ms, raw odometry stale over one second, unexpected frames,
-or non-increasing raw odometry stamps. Mapping-session process monitoring stops
+stream stale over 500 ms, unexpected frames, or non-increasing raw odometry
+stamps. Raw odometry gets at most 20 seconds to produce 10 successfully fused
+samples; only then is the strict one-second runtime stale guard armed.
+Mapping-session process monitoring stops
 the robot and session if a required process exits.
 
 No acceleration, magnetic heading, absolute orientation, wheel model, fixed

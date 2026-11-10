@@ -2293,6 +2293,8 @@ class MappingSession(Node):
                         "max_imu_gap_s": 0.10,
                         "max_imu_stale_s": 0.50,
                         "max_raw_odom_stale_s": 1.00,
+                        "raw_odom_stable_samples": 10,
+                        "raw_odom_startup_timeout_s": 20.0,
                         "rf2o_publish_tf": False,
                     }
                     if self.odom_mode == "imu_yaw"

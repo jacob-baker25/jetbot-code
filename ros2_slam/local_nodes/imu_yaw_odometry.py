@@ -5,7 +5,13 @@ import copy
 import math
 import time
 
-from imu_yaw_odometry_core import ImuTimingError, PlanarYawFusion, YawIntegrator
+from imu_yaw_odometry_core import (
+    ImuTimingError,
+    PlanarYawFusion,
+    StartupAwareWatchdog,
+    StreamTimingError,
+    YawIntegrator,
+)
 
 
 IMU_TOPIC = "/imu/data_raw"
@@ -14,6 +20,8 @@ OUTPUT_ODOM_TOPIC = "/odom_rf2o"
 MAX_IMU_GAP_S = 0.10
 MAX_IMU_STALE_S = 0.50
 MAX_ODOM_STALE_S = 1.00
+ODOM_STABLE_SAMPLES = 10
+ODOM_STARTUP_TIMEOUT_S = 20.0
 
 
 def message_stamp_s(message):
@@ -42,10 +50,15 @@ def main():
     broadcaster = TransformBroadcaster(node)
     integrator = YawIntegrator(max_gap_s=MAX_IMU_GAP_S)
     fusion = PlanarYawFusion()
+    odom_watchdog = StartupAwareWatchdog(
+        time.monotonic(),
+        stable_samples=ODOM_STABLE_SAMPLES,
+        startup_timeout_s=ODOM_STARTUP_TIMEOUT_S,
+        stale_timeout_s=MAX_ODOM_STALE_S,
+    )
     state = {
         "fatal": None,
         "last_imu_receipt": None,
-        "last_odom_receipt": None,
         "last_odom_stamp": None,
         "published": 0,
         "startup_odom_drops": 0,
@@ -76,7 +89,6 @@ def main():
             state["fatal"] = "raw odometry timestamp did not increase"
             return
         state["last_odom_stamp"] = timestamp
-        state["last_odom_receipt"] = time.monotonic()
         interpolated = integrator.interpolate(timestamp)
         if interpolated is None:
             state["startup_odom_drops"] += 1
@@ -116,7 +128,9 @@ def main():
         transform.transform.rotation = copy.deepcopy(output.pose.pose.orientation)
         broadcaster.sendTransform(transform)
         state["published"] += 1
-        if state["published"] == 1:
+        was_ready = odom_watchdog.ready
+        odom_watchdog.observe(time.monotonic())
+        if not was_ready and odom_watchdog.ready:
             node.get_logger().info(
                 "IMU_YAW_ODOM_READY raw={} imu={} output={} tf=odom->base_link".format(
                     RAW_ODOM_TOPIC, IMU_TOPIC, OUTPUT_ODOM_TOPIC
@@ -148,9 +162,10 @@ def main():
                 node.get_logger().error("IMU_YAW_ODOM_FATAL IMU stream became stale")
                 exit_code = 1
                 break
-            if (state["last_odom_receipt"] is not None and
-                    time.monotonic() - state["last_odom_receipt"] > MAX_ODOM_STALE_S):
-                node.get_logger().error("IMU_YAW_ODOM_FATAL raw odometry became stale")
+            try:
+                odom_watchdog.check(time.monotonic())
+            except StreamTimingError as exc:
+                node.get_logger().error("IMU_YAW_ODOM_FATAL " + str(exc))
                 exit_code = 1
                 break
             now = time.monotonic()
