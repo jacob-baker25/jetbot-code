@@ -10,16 +10,20 @@ In `imu_yaw` mode:
 1. The qualified Phidget publisher zeros while the robot is stationary and
    publishes `/imu/data_raw` in `base_link`.
 2. RF2O publishes `/odom_rf2o_raw` with `publish_tf=false`.
-3. `imu_yaw_odometry.py` buffers device-stamped yaw rates, interpolates the
-   integrated yaw at each RF2O timestamp, and composes RF2O's relative body
-   translation using that yaw.
+3. `imu_yaw_odometry.py` buffers device-stamped yaw rates and queues each raw
+   RF2O message until the IMU timeline brackets its timestamp. It then
+   interpolates integrated yaw at that timestamp and composes RF2O's relative
+   body translation using that yaw.
 4. The node publishes `/odom_rf2o` and the only `odom -> base_link` TF.
 5. Slam Toolbox continues to publish `map -> odom`.
 
 The mode exits on nonfinite/reversed IMU data, an IMU gap over 100 ms, an IMU
 stream stale over 500 ms, unexpected frames, or non-increasing raw odometry
-stamps. Raw odometry gets at most 20 seconds to produce 10 successfully fused
-samples; only then is the strict one-second runtime stale guard armed.
+stamps. Raw odometry gets at most 20 seconds to produce 10 valid messages; only
+then is its strict one-second input-stale guard armed. A queued odometry message
+may wait at most one second for matching IMU time. Input receipt and fused-output
+counts are reported separately, so an input failure cannot be mislabeled as a
+fusion synchronization failure.
 Mapping-session process monitoring stops
 the robot and session if a required process exits.
 
@@ -47,19 +51,21 @@ Phidget publisher.
 source /opt/ros/eloquent/setup.bash
 source ~/autochair_ros2_ws/install/slam_toolbox/share/slam_toolbox/local_setup.bash
 cd ~/autochair_ros2_ws/local_nodes
-python3 mapping_session.py imu_yaw_smoke_01 euclidean_heading narrow imu_yaw
+python3 mapping_session.py imu_yaw_smoke_04 euclidean_heading narrow imu_yaw
 ```
 
 Required output includes `Odometry mode: imu_yaw`, an odometry-source PASS,
 20/20 scan-TF, and stationary-preflight PASS. Press `Q` without moving. Inspect:
 
 ```bash
-EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_01_* | head -1)
+EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_04_* | head -1)
 grep -E 'IMU_YAW_ODOM_(READY|FATAL|STATUS)' "$EXP/imu_yaw_odom.log"
 grep -E 'queue drops|invalid|No TF/odom' "$EXP/imu.log" | tail
 ```
 
-Any FATAL marker blocks motion testing.
+Any FATAL marker blocks motion testing. A healthy status line has continuously
+increasing `raw_received` and `published`, normally zero or one `pending`, and
+zero `too_old_drops`.
 
 ## Manual turn-pair qualification
 

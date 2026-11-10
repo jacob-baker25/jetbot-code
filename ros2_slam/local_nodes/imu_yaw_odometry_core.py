@@ -17,6 +17,45 @@ def wrap_radians(value):
     return (value + math.pi) % (2.0 * math.pi) - math.pi
 
 
+class TimestampSynchronizer:
+    """Hold slower messages until a faster timestamped stream brackets them."""
+
+    def __init__(self, max_pending=100):
+        self.max_pending = max_pending
+        self.pending = []
+        self.last_timestamp_s = None
+
+    def add(self, timestamp_s, receipt_s, value):
+        if not math.isfinite(timestamp_s) or not math.isfinite(receipt_s):
+            raise StreamTimingError("nonfinite queued-message timestamp")
+        if (self.last_timestamp_s is not None and
+                timestamp_s <= self.last_timestamp_s):
+            raise StreamTimingError("raw odometry timestamp did not increase")
+        if len(self.pending) >= self.max_pending:
+            raise StreamTimingError(
+                "raw odometry synchronization queue overflow ({})".format(
+                    self.max_pending
+                )
+            )
+        self.pending.append((timestamp_s, receipt_s, value))
+        self.last_timestamp_s = timestamp_s
+
+    def drain(self, oldest_reference_s, newest_reference_s):
+        """Return (ready, too_old), retaining messages newer than reference."""
+        ready = []
+        too_old = []
+        while self.pending and self.pending[0][0] < oldest_reference_s:
+            too_old.append(self.pending.pop(0))
+        while self.pending and self.pending[0][0] <= newest_reference_s:
+            ready.append(self.pending.pop(0))
+        return ready, too_old
+
+    def oldest_wait_s(self, now_s):
+        if not self.pending:
+            return None
+        return now_s - self.pending[0][1]
+
+
 class YawIntegrator:
     def __init__(self, max_gap_s=0.10, history_s=15.0):
         self.max_gap_s = max_gap_s

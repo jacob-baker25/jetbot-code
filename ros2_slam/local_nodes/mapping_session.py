@@ -652,7 +652,7 @@ class MappingSession(Node):
             "source /opt/ros/eloquent/setup.bash && "
             "source {}/install/setup.bash "
             ">/dev/null 2>&1 || true; "
-            "exec {}"
+            "exec env PYTHONUNBUFFERED=1 {}"
         ).format(
             WORKSPACE,
             command
@@ -954,7 +954,7 @@ class MappingSession(Node):
         if self.odom_mode == "imu_yaw":
             self.start_process(
                 "imu_yaw_odom",
-                "python3 {}/imu_yaw_odometry.py".format(LOCAL_NODES)
+                "python3 -u {}/imu_yaw_odometry.py".format(LOCAL_NODES)
             )
             time.sleep(1.0)
             rf2o_command = (
@@ -1243,7 +1243,30 @@ class MappingSession(Node):
                 is not None
             )
 
-            processes_ready = not self.failed_process_names()
+            failed_processes = self.failed_process_names()
+            processes_ready = not failed_processes
+
+            if failed_processes:
+                print()
+                print(
+                    "ERROR: Required ROS process exited during startup: {}".format(
+                        ", ".join(failed_processes)
+                    )
+                )
+                for process_name in failed_processes:
+                    log_path = self.process_log_paths.get(process_name)
+                    if not log_path:
+                        continue
+                    print("--- last lines of {} ---".format(log_path))
+                    try:
+                        with open(log_path, "r", errors="replace") as stream:
+                            lines = stream.readlines()
+                        for line in lines[-20:]:
+                            print(line.rstrip())
+                    except (IOError, OSError) as exc:
+                        print("Could not read log: {}".format(exc))
+                print()
+                return False
 
             ready = all([
                 odom_ready,
@@ -2301,6 +2324,7 @@ class MappingSession(Node):
                         "max_imu_gap_s": 0.10,
                         "max_imu_stale_s": 0.50,
                         "max_raw_odom_stale_s": 1.00,
+                        "max_fusion_wait_s": 1.00,
                         "raw_odom_stable_samples": 10,
                         "raw_odom_startup_timeout_s": 20.0,
                         "rf2o_publish_tf": False,

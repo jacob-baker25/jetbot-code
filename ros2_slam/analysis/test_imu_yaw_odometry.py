@@ -38,6 +38,31 @@ class ImuYawOdometryTest(unittest.TestCase):
         with self.assertRaises(core.ImuTimingError):
             integrator.add(1.0, 0.0)
 
+    def test_synchronizer_waits_for_reference_then_releases_in_order(self):
+        queue = core.TimestampSynchronizer(max_pending=3)
+        queue.add(10.04, 100.0, "first")
+        queue.add(10.06, 100.1, "second")
+        ready, too_old = queue.drain(10.00, 10.03)
+        self.assertEqual(ready, [])
+        self.assertEqual(too_old, [])
+        self.assertAlmostEqual(queue.oldest_wait_s(100.5), 0.5)
+        ready, too_old = queue.drain(10.00, 10.05)
+        self.assertEqual([item[2] for item in ready], ["first"])
+        self.assertEqual(too_old, [])
+        ready, too_old = queue.drain(10.00, 10.07)
+        self.assertEqual([item[2] for item in ready], ["second"])
+        self.assertEqual(too_old, [])
+
+    def test_synchronizer_reports_too_old_and_rejects_bad_order(self):
+        queue = core.TimestampSynchronizer(max_pending=2)
+        queue.add(9.0, 100.0, "old")
+        queue.add(10.0, 100.1, "ready")
+        ready, too_old = queue.drain(9.5, 10.0)
+        self.assertEqual([item[2] for item in too_old], ["old"])
+        self.assertEqual([item[2] for item in ready], ["ready"])
+        with self.assertRaises(core.StreamTimingError):
+            queue.add(10.0, 100.2, "duplicate")
+
     def test_fusion_uses_imu_yaw_and_rf2o_body_translation(self):
         fusion = core.PlanarYawFusion()
         x, y, yaw = fusion.update(0.0, 0.0, 0.0, 0.0)
@@ -87,6 +112,9 @@ class ImuYawOdometryTest(unittest.TestCase):
         self.assertIn("odom_topic:=/odom_rf2o_raw", text)
         self.assertIn("publish_tf:=false", text)
         self.assertIn("imu_yaw_odometry.py", text)
+        self.assertIn("python3 -u {}/imu_yaw_odometry.py", text)
+        self.assertIn("exec env PYTHONUNBUFFERED=1 {}", text)
+        self.assertIn("Required ROS process exited during startup", text)
 
     def test_session_verifies_live_odom_messages_not_buffered_log_text(self):
         tree = ast.parse(SESSION.read_text(encoding="utf-8"))
