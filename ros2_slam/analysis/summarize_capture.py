@@ -88,13 +88,14 @@ def summarize(path):
                     angle += 0.5*(va+vb)*dt
                 else:
                     skipped += 1
-            info.update({'raw_sensor_z_integral_deg': math.degrees(angle),
+            info.update({'integrated_gyro_z_deg': math.degrees(angle),
                          'integration_skipped_intervals': skipped,
                          'orientation_covariance_first': rows[0]['msg']['orientation_covariance'],
                          'angular_velocity_covariance_first': rows[0]['msg']['angular_velocity_covariance']})
     report['interpretation'] = (
         'Missing topics were not received, not proven absent. Best-effort capture can drop data. '
-        'Gyro integral is raw sensor-Z, not robot yaw unless mounted Z-up; no bias correction. '
+        'phidget_raw integral is native sensor Z; ROS Imu integral is expressed in its header frame. '
+        'Neither is an external ground-truth angle; no additional bias correction is applied. '
         'Gyro mean measures bias only in an entirely stationary capture. '
         'Age uses publisher and recorder ROS clocks; acquisition time may differ. '
         'Endpoint residual flags metadata inconsistency, not its effect on this legacy mapper.')

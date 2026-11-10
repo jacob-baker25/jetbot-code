@@ -45,7 +45,8 @@ class CaptureTest(unittest.TestCase):
             env = dict(os.environ, AUTOCHAIR_WS=workspace.as_posix())
             subprocess.run([bash,(ROOT/'deploy_sensor_diagnostics.sh').as_posix()],
                            env=env,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-            for name in ['mapping_session.py','matcher_profiles.py','capture_sensors.py','phidget_probe.py']:
+            for name in ['mapping_session.py','matcher_profiles.py','capture_sensors.py',
+                         'phidget_probe.py','imu_planar.py','phidget_imu_publisher.py']:
                 self.assertEqual((target/name).read_bytes(),(ROOT/'local_nodes'/name).read_bytes())
             backup=list((workspace/'backups').glob('*/mapping_session.py'))
             self.assertEqual(len(backup),1)
@@ -54,6 +55,8 @@ class CaptureTest(unittest.TestCase):
     def test_python36_syntax(self):
         for path in [ROOT/'local_nodes/capture_sensors.py',
                      ROOT/'local_nodes/phidget_probe.py',
+                     ROOT/'local_nodes/imu_planar.py',
+                     ROOT/'local_nodes/phidget_imu_publisher.py',
                      ROOT/'local_nodes/mapping_session.py',
                      ROOT/'analysis/summarize_capture.py']:
             ast.parse(path.read_text(encoding='utf-8'), feature_version=(3,6))
@@ -117,7 +120,7 @@ class CaptureTest(unittest.TestCase):
             path.write_text('\n'.join(json.dumps(r) for r in records)+'\npartial')
             result=summarize(str(path))
             imu=result['topics']['/imu/data']
-            self.assertAlmostEqual(imu['raw_sensor_z_integral_deg'],18)
+            self.assertAlmostEqual(imu['integrated_gyro_z_deg'],18)
             self.assertEqual(imu['duplicate_stamps'],1)
             self.assertEqual(imu['backward_stamps'],1)
             self.assertEqual(imu['integration_skipped_intervals'],2)

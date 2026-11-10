@@ -65,7 +65,7 @@ class BoundedWriter:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', help='New .jsonl file; never overwrites')
-    parser.add_argument('--imu-topic', default='/imu/data')
+    parser.add_argument('--imu-topic', default='/imu/data_raw')
     parser.add_argument('--seconds', type=float, default=300)
     parser.add_argument('--max-mb', type=float, default=64)
     parser.add_argument('--reserve-mb', type=float, default=150)
