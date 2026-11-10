@@ -28,4 +28,5 @@ done
 echo
 echo "Backup: ${BACKUP}"
 echo "Deployment complete. No colcon build is needed."
-echo "This changes lidar angle handedness and LaserScan angle_max only."
+echo "This changes lidar angle handedness only."
+echo "Legacy Karto-compatible LaserScan count metadata is retained."

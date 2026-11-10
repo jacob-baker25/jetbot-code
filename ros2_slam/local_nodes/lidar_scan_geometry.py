@@ -20,7 +20,13 @@ def ros_bin_for_hardware_angle(angle_deg, num_bins=NUM_BINS):
 
 
 def laser_scan_angles(num_bins=NUM_BINS):
-    """Return (angle_min, angle_max, angle_increment) for *num_bins* samples."""
+    """Return scan metadata compatible with this legacy Karto build.
+
+    Karto computes its expected count as (angle_max-angle_min)/increment,
+    without adding the inclusive endpoint. It therefore requires 2*pi here
+    for 360 one-degree values even though the final array index is 359. RF2O
+    separately uses the actual array length when constructing its geometry.
+    """
 
     increment = (2.0 * math.pi) / num_bins
-    return 0.0, (num_bins - 1) * increment, increment
+    return 0.0, num_bins * increment, increment

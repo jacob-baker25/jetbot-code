@@ -29,11 +29,11 @@ class LidarGeometryTest(unittest.TestCase):
         self.assertEqual(geometry.ros_bin_for_hardware_angle(0.9), 0)
         self.assertEqual(geometry.ros_bin_for_hardware_angle(1.9), 359)
 
-    def test_laserscan_metadata_matches_last_sample(self):
+    def test_laserscan_metadata_retains_legacy_karto_count_contract(self):
         angle_min, angle_max, increment = geometry.laser_scan_angles()
         self.assertEqual(angle_min, 0.0)
         self.assertAlmostEqual(increment, 2.0 * math.pi / 360.0)
-        self.assertAlmostEqual(angle_max, angle_min + 359 * increment)
+        self.assertAlmostEqual(angle_max, angle_min + 360 * increment)
 
     def test_python36_syntax(self):
         for path in (HELPER, ROOT / "local_nodes" / "rplidar_python_bridge.py"):

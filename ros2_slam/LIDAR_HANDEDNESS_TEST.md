@@ -7,13 +7,12 @@ clockwise. ROS REP 103 requires positive yaw and planar angles to increase
 counterclockwise. The old bridge put each native angle directly into a
 positive-increment `LaserScan`, so it reflected every scan across an axis.
 
-The bridge also published 360 samples at one degree per sample while declaring
-`angle_max = 2*pi`. The last sample is actually at 359 degrees. The repaired
-metadata now satisfies:
-
-```text
-angle_max = angle_min + (number_of_samples - 1) * angle_increment
-```
+The bridge continues to declare `angle_max = 2*pi` for 360 one-degree values.
+Although an inclusive-endpoint interpretation would put the last sample at 359
+degrees, this legacy Karto build calculates its expected count without adding
+one and rejects a 359-degree upper bound as "360 readings, expected 359". RF2O
+has a separate array-length correction. This compatibility metadata is retained
+deliberately and must not be confused with the angle-direction repair.
 
 The existing 180-degree static yaw is retained. It controls which way the
 lidar's zero ray points on the robot; it cannot correct a reflection and is a
