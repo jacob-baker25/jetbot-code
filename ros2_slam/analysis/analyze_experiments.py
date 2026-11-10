@@ -276,13 +276,17 @@ def analyze_directory(path):
     completed = bool(checkpoints and checkpoints[-1].get("label") == "final")
     status = results.get("run_status") if results else None
     profile = (results or {}).get("configuration", {}).get("matcher_profile")
+    odom_mode = (results or {}).get("configuration", {}).get("odom_mode", "rf2o")
     config_passed = (results or {}).get("preflight", {}).get("karto_config") or {}
+    odom_source_passed = (results or {}).get("preflight", {}).get("odom_source") or {}
     if not status:
         status = "complete" if completed else "incomplete"
     if requested_mode and runtime_mode and requested_mode != runtime_mode:
         validity = "exclude_mode_mismatch"
     elif profile and not config_passed.get("passed"):
         validity = "exclude_karto_config"
+    elif odom_mode == "imu_yaw" and not odom_source_passed.get("passed"):
+        validity = "exclude_odom_source"
     elif status != "complete":
         validity = "exclude_incomplete"
     elif not completed:
@@ -297,6 +301,7 @@ def analyze_directory(path):
         "requested_mode_inferred": requested_inferred,
         "runtime_mode": runtime_mode,
         "matcher_profile": profile or "historical_unverified",
+        "odom_mode": odom_mode,
         "run_status": status,
         "validity": validity,
     }
@@ -343,21 +348,22 @@ def markdown_report(rows, root):
         "",
         "## Run classification",
         "",
-        "| Run | Requested | Runtime | Matcher profile | Validity | Karto states | Loops | "
+        "| Run | Requested | Runtime | Matcher profile | Odom mode | Validity | Karto states | Loops | "
         "RF2O closure (m) | SLAM closure (m) | SLAM heading (deg) |",
-        "|---|---:|---:|---|---|---:|---:|---:|---:|---:|",
+        "|---|---:|---:|---|---|---|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         requested = fmt(row.get("requested_mode"))
         if row.get("requested_mode_inferred"):
             requested += "*"
         lines.append(
-            "| {name} | {requested} | {runtime} | {profile} | {validity} | {states} | "
+            "| {name} | {requested} | {runtime} | {profile} | {odom} | {validity} | {states} | "
             "{loops} | {rf} | {slam} | {heading} |".format(
                 name=row["name"],
                 requested=requested,
                 runtime=fmt(row.get("runtime_mode")),
                 profile=row["matcher_profile"],
+                odom=row["odom_mode"],
                 validity=row["validity"],
                 states=fmt(row.get("karto_states"), 0),
                 loops=fmt(row.get("loop_closures"), 0),
@@ -370,23 +376,25 @@ def markdown_report(rows, root):
         lines.extend(["", r"\* Requested mode inferred from the directory name."])
 
     valid = [row for row in rows if row["validity"] == "valid_complete"]
-    modes = sorted(set((row["runtime_mode"], row["matcher_profile"])
+    modes = sorted(set((row["runtime_mode"], row["matcher_profile"], row["odom_mode"])
                        for row in valid if row.get("runtime_mode")))
     lines.extend(["", "## Descriptive aggregates (valid completed runs only)", ""])
     lines.append(
-        "| Runtime mode | Matcher profile | n | Mean Karto states | Mean match response | "
+        "| Runtime mode | Matcher profile | Odom mode | n | Mean Karto states | Mean match response | "
         "Mean RF2O closure (m) | Mean SLAM closure (m) | "
         "Mean abs SLAM heading (deg) |"
     )
-    lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
-    for mode, profile in modes:
+    lines.append("|---|---|---|---:|---:|---:|---:|---:|---:|")
+    for mode, profile, odom_mode in modes:
         subset = [row for row in valid if row.get("runtime_mode") == mode
-                  and row["matcher_profile"] == profile]
+                  and row["matcher_profile"] == profile
+                  and row["odom_mode"] == odom_mode]
         lines.append(
-            "| {mode} | {profile} | {count} | {states} | {response} | {rf} | {slam} | "
+            "| {mode} | {profile} | {odom} | {count} | {states} | {response} | {rf} | {slam} | "
             "{heading} |".format(
                 mode=mode,
                 profile=profile,
+                odom=odom_mode,
                 count=len(subset),
                 states=fmt(mean_or_none([row["karto_states"] for row in subset])),
                 response=fmt(mean_or_none([

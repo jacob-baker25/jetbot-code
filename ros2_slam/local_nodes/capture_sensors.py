@@ -69,6 +69,8 @@ def main():
     parser.add_argument('--seconds', type=float, default=300)
     parser.add_argument('--max-mb', type=float, default=64)
     parser.add_argument('--reserve-mb', type=float, default=150)
+    parser.add_argument('--lean', action='store_true',
+                        help='Record IMU plus raw/final odometry only; omit scans and TF')
     args = parser.parse_args()
     if any(not math.isfinite(x) or x <= 0 for x in
            (args.seconds, args.max_mb, args.reserve_mb)):
@@ -98,13 +100,19 @@ def main():
     static_qos = QoSProfile(depth=100)
     static_qos.durability = QoSDurabilityPolicy.TRANSIENT_LOCAL
     static_qos.reliability = QoSReliabilityPolicy.RELIABLE
-    specs = [(LaserScan, '/scan', qos_profile_sensor_data),
-             (LaserScan, '/scan_slam', qos_profile_sensor_data),
-             (Odometry, '/odom_rf2o', qos_profile_sensor_data),
-             (Odometry, '/odometry/filtered', qos_profile_sensor_data),
-             (Imu, args.imu_topic, qos_profile_sensor_data),
-             (TFMessage, '/tf', qos_profile_sensor_data),
-             (TFMessage, '/tf_static', static_qos)]
+    if args.lean:
+        specs = [(Odometry, '/odom_rf2o_raw', qos_profile_sensor_data),
+                 (Odometry, '/odom_rf2o', qos_profile_sensor_data),
+                 (Imu, args.imu_topic, qos_profile_sensor_data)]
+    else:
+        specs = [(LaserScan, '/scan', qos_profile_sensor_data),
+                 (LaserScan, '/scan_slam', qos_profile_sensor_data),
+                 (Odometry, '/odom_rf2o_raw', qos_profile_sensor_data),
+                 (Odometry, '/odom_rf2o', qos_profile_sensor_data),
+                 (Odometry, '/odometry/filtered', qos_profile_sensor_data),
+                 (Imu, args.imu_topic, qos_profile_sensor_data),
+                 (TFMessage, '/tf', qos_profile_sensor_data),
+                 (TFMessage, '/tf_static', static_qos)]
     try:
         for kind, topic, qos in specs:
             subscriptions.append(node.create_subscription(

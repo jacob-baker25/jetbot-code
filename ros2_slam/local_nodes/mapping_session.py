@@ -178,7 +178,8 @@ class MappingSession(Node):
         self,
         experiment_name,
         scan_distance_gate_mode,
-        matcher_profile="baseline"
+        matcher_profile="baseline",
+        odom_mode="rf2o"
     ):
 
         super().__init__(
@@ -193,6 +194,7 @@ class MappingSession(Node):
             scan_distance_gate_mode
         )
         self.matcher_profile = matcher_profile
+        self.odom_mode = odom_mode
         self.effective_karto_parameters = {}
 
         self.session_name = (
@@ -224,6 +226,23 @@ class MappingSession(Node):
         shutil.copyfile(profile_source, self.slam_params_file)
         with open(self.slam_params_file, "rb") as profile_file:
             self.slam_params_sha256 = hashlib.sha256(profile_file.read()).hexdigest()
+        self.odom_source_sha256 = {}
+        odom_source_names = (
+            (
+                "phidget_imu_publisher.py",
+                "imu_yaw_odometry.py",
+                "imu_yaw_odometry_core.py",
+            )
+            if self.odom_mode == "imu_yaw"
+            else ()
+        )
+        for source_name in odom_source_names:
+            source_path = os.path.join(LOCAL_NODES, source_name)
+            if os.path.isfile(source_path):
+                with open(source_path, "rb") as source_file:
+                    self.odom_source_sha256[source_name] = hashlib.sha256(
+                        source_file.read()
+                    ).hexdigest()
 
         self.session_start_unix = (
             time.time()
@@ -236,6 +255,7 @@ class MappingSession(Node):
             "karto_config": None,
             "scan_tf": None,
             "stationary": None,
+            "odom_source": None,
         }
 
         self.robot = Robot()
@@ -498,6 +518,8 @@ class MappingSession(Node):
         patterns = [
             "rplidar_python_bridge.py",
             "scan_delay_node.py",
+            "phidget_imu_publisher.py",
+            "imu_yaw_odometry.py",
             "rf2o_laser_odometry_node",
             "sync_slam_toolbox_node",
             "online_sync_launch.py",
@@ -678,6 +700,73 @@ class MappingSession(Node):
         return False
 
 
+    def failed_process_names(self):
+
+        return [
+            name
+            for name, process in self.processes
+            if process.poll() is not None
+        ]
+
+
+    def require_processes_alive(self):
+
+        failed = self.failed_process_names()
+
+        if failed:
+            self.stop_robot()
+            raise RuntimeError(
+                "Required ROS process exited: {}".format(
+                    ", ".join(failed)
+                )
+            )
+
+
+    def verify_odom_source(self):
+
+        passed = True
+        marker = None
+        errors = []
+
+        if self.odom_mode == "imu_yaw":
+            marker = "IMU_YAW_ODOM_READY"
+            log_path = self.process_log_paths.get("imu_yaw_odom")
+            deadline = time.monotonic() + 5.0
+            found = False
+            while time.monotonic() < deadline:
+                try:
+                    with open(log_path, "r", errors="replace") as stream:
+                        found = marker in stream.read()
+                except (IOError, OSError, TypeError):
+                    pass
+                if found:
+                    break
+                self.require_processes_alive()
+                rclpy.spin_once(self, timeout_sec=0.1)
+            passed = found
+            if not found:
+                errors.append("IMU yaw odometry readiness marker unavailable")
+
+        self.preflight_results["odom_source"] = {
+            "passed": passed,
+            "mode": self.odom_mode,
+            "marker": marker,
+            "errors": errors,
+        }
+
+        print()
+        print("=" * 70)
+        print("ODOMETRY SOURCE CHECK")
+        print("=" * 70)
+        print("Requested mode: {}".format(self.odom_mode))
+        print("RESULT: {}".format("PASS" if passed else "FAIL"))
+        for error in errors:
+            print("  " + error)
+        print("=" * 70)
+        print()
+        return passed
+
+
     def verify_slam_gate_mode(self):
 
         print()
@@ -809,7 +898,19 @@ class MappingSession(Node):
         print("Starting ROS stack...")
         print()
 
-        # 1. LiDAR
+        # 1. Qualified IMU zero, before the LiDAR motor introduces vibration.
+        if self.odom_mode == "imu_yaw":
+            self.start_process(
+                "imu",
+                (
+                    "env LD_LIBRARY_PATH=\"$HOME/.local/phidget22/lib"
+                    "${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\" "
+                    "python3 {}/phidget_imu_publisher.py"
+                ).format(LOCAL_NODES)
+            )
+            time.sleep(4.0)
+
+        # 2. LiDAR
         self.start_process(
             "lidar",
             (
@@ -822,7 +923,7 @@ class MappingSession(Node):
 
         time.sleep(2.0)
 
-        # 2. Static TF
+        # 3. Static TF
         self.start_process(
             "static_tf",
             (
@@ -841,19 +942,29 @@ class MappingSession(Node):
 
         time.sleep(1.0)
 
-        # 3. RF2O
-        self.start_process(
-            "rf2o",
-            (
-                "ros2 run "
-                "rf2o_laser_odometry "
-                "rf2o_laser_odometry_node"
+        # 4. Optional yaw-aided odometry subscriber.
+        if self.odom_mode == "imu_yaw":
+            self.start_process(
+                "imu_yaw_odom",
+                "python3 {}/imu_yaw_odometry.py".format(LOCAL_NODES)
             )
-        )
+            time.sleep(1.0)
+            rf2o_command = (
+                "ros2 run rf2o_laser_odometry rf2o_laser_odometry_node "
+                "--ros-args -p odom_topic:=/odom_rf2o_raw "
+                "-p publish_tf:=false"
+            )
+        else:
+            rf2o_command = (
+                "ros2 run rf2o_laser_odometry rf2o_laser_odometry_node"
+            )
+
+        # 5. RF2O (direct baseline or raw input to IMU-yaw odometry).
+        self.start_process("rf2o", rf2o_command)
 
         time.sleep(2.0)
 
-        # 4. Delay relay
+        # 6. Delay relay
         self.start_process(
             "scan_delay",
             (
@@ -866,7 +977,7 @@ class MappingSession(Node):
 
         time.sleep(1.0)
 
-        # 5. SLAM
+        # 7. SLAM
         self.start_process(
             "slam",
             (
@@ -902,8 +1013,7 @@ class MappingSession(Node):
 
         self.stop_robot()
 
-        # Processes are stopped in reverse startup order:
-        # SLAM -> delay -> RF2O -> TF -> LiDAR
+        # Processes are stopped in reverse startup order.
 
         for (
             name,
@@ -987,6 +1097,8 @@ class MappingSession(Node):
             <
             end_time
         ):
+
+            self.require_processes_alive()
 
             rclpy.spin_once(
                 self,
@@ -1123,23 +1235,7 @@ class MappingSession(Node):
                 is not None
             )
 
-            processes_ready = all([
-                self.process_is_alive(
-                    "lidar"
-                ),
-                self.process_is_alive(
-                    "static_tf"
-                ),
-                self.process_is_alive(
-                    "rf2o"
-                ),
-                self.process_is_alive(
-                    "scan_delay"
-                ),
-                self.process_is_alive(
-                    "slam"
-                ),
-            ])
+            processes_ready = not self.failed_process_names()
 
             ready = all([
                 odom_ready,
@@ -2188,6 +2284,21 @@ class MappingSession(Node):
 
             "configuration": {
                 "matcher_profile": self.matcher_profile,
+                "odom_mode": self.odom_mode,
+                "imu_yaw_configuration": (
+                    {
+                        "imu_topic": "/imu/data_raw",
+                        "raw_odom_topic": "/odom_rf2o_raw",
+                        "output_odom_topic": "/odom_rf2o",
+                        "max_imu_gap_s": 0.10,
+                        "max_imu_stale_s": 0.50,
+                        "max_raw_odom_stale_s": 1.00,
+                        "rf2o_publish_tf": False,
+                    }
+                    if self.odom_mode == "imu_yaw"
+                    else None
+                ),
+                "odom_source_sha256": self.odom_source_sha256,
                 "slam_params_file": self.slam_params_file,
                 "slam_params_sha256": self.slam_params_sha256,
                 "drive_speed": (
@@ -2543,6 +2654,8 @@ class MappingSession(Node):
                 rclpy.ok()
             ):
 
+                self.require_processes_alive()
+
                 rclpy.spin_once(
                     self,
                     timeout_sec=0.01
@@ -2797,6 +2910,8 @@ class MappingSession(Node):
                 self.experiment_dir
             )
         )
+        print("Odometry mode:")
+        print("  {}".format(self.odom_mode))
 
         if not self.check_for_existing_processes():
 
@@ -2821,6 +2936,15 @@ class MappingSession(Node):
             self.stop_stack()
 
             return 1
+
+        if not self.verify_odom_source():
+
+            self.run_status = "failed_odom_source"
+            self.session_end_unix = time.time()
+            self.write_results()
+            self.stop_stack()
+
+            return 7
 
         if not self.verify_slam_gate_mode():
 
@@ -2933,7 +3057,7 @@ class MappingSession(Node):
 
 def main():
 
-    if len(sys.argv) not in [2, 3, 4]:
+    if len(sys.argv) not in [2, 3, 4, 5]:
 
         print()
         print(
@@ -2943,7 +3067,8 @@ def main():
         print(
             "  python3 mapping_session.py "
             "EXPERIMENT_NAME "
-            "[legacy|euclidean|euclidean_heading] [baseline|narrow]"
+            "[legacy|euclidean|euclidean_heading] [baseline|narrow] "
+            "[rf2o|imu_yaw]"
         )
 
         print()
@@ -2980,9 +3105,14 @@ def main():
         )
         sys.exit(1)
 
-    matcher_profile = sys.argv[3] if len(sys.argv) == 4 else "baseline"
+    matcher_profile = sys.argv[3] if len(sys.argv) >= 4 else "baseline"
     if matcher_profile not in PROFILE_FILES:
         print("Matcher profile must be 'baseline' or 'narrow'.")
+        sys.exit(1)
+
+    odom_mode = sys.argv[4] if len(sys.argv) == 5 else "rf2o"
+    if odom_mode not in ["rf2o", "imu_yaw"]:
+        print("Odometry mode must be 'rf2o' or 'imu_yaw'.")
         sys.exit(1)
 
     rclpy.init()
@@ -2990,7 +3120,8 @@ def main():
     node = MappingSession(
         experiment_name,
         scan_distance_gate_mode,
-        matcher_profile
+        matcher_profile,
+        odom_mode
     )
 
     exit_code = 1

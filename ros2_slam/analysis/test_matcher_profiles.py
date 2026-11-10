@@ -122,8 +122,36 @@ class ProfilesTest(unittest.TestCase):
                                      else "exclude_karto_config")
                     rows.append(row)
         report = markdown_report(rows, "test")
-        self.assertIn("| euclidean_heading | baseline | 1 |", report)
-        self.assertIn("| euclidean_heading | narrow | 1 |", report)
+        self.assertIn("| euclidean_heading | baseline | rf2o | 1 |", report)
+        self.assertIn("| euclidean_heading | narrow | rf2o | 1 |", report)
+
+    def test_analyzer_separates_odometry_modes(self):
+        rows = []
+        for odom_mode in ("rf2o", "imu_yaw"):
+            with tempfile.TemporaryDirectory() as folder:
+                pose = {"x": 0, "y": 0, "yaw_deg": 0}
+                results = {
+                    "configuration": {
+                        "matcher_profile": "narrow",
+                        "scan_distance_gate_mode": "euclidean_heading",
+                        "odom_mode": odom_mode,
+                    },
+                    "runtime_gate_mode": "euclidean_heading",
+                    "run_status": "complete",
+                    "preflight": {
+                        "karto_config": {"passed": True},
+                        "odom_source": {"passed": True},
+                    },
+                    "checkpoints": [
+                        {"label": label, "rf2o": pose, "slam": pose}
+                        for label in ("start", "final")
+                    ],
+                }
+                (Path(folder) / "results.json").write_text(json.dumps(results))
+                rows.append(analyze_directory(folder))
+        report = markdown_report(rows, "test")
+        self.assertIn("| euclidean_heading | narrow | imu_yaw | 1 |", report)
+        self.assertIn("| euclidean_heading | narrow | rf2o | 1 |", report)
 
     def test_python36_syntax(self):
         # Newer Python can validate against the Jetson's Python 3.6 grammar.

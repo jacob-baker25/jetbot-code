@@ -6,7 +6,8 @@ WORKSPACE="${AUTOCHAIR_WS:-${HOME}/autochair_ros2_ws}"
 TARGET="${WORKSPACE}/local_nodes"
 [[ -d "${TARGET}" ]] || { echo "Missing ${TARGET}" >&2; exit 1; }
 FILES=(mapping_session.py matcher_profiles.py capture_sensors.py phidget_probe.py \
-       imu_planar.py phidget_imu_publisher.py)
+       imu_planar.py phidget_imu_publisher.py imu_yaw_odometry_core.py \
+       imu_yaw_odometry.py)
 for name in "${FILES[@]}"; do
   [[ -f "${SCRIPT_DIR}/local_nodes/${name}" ]] || exit 1
 done

@@ -29,6 +29,10 @@ FILES=(
   "slam_toolbox/config/mapper_params_online_sync_narrow.yaml"
   "local_nodes/mapping_session.py"
   "local_nodes/matcher_profiles.py"
+  "local_nodes/imu_planar.py"
+  "local_nodes/phidget_imu_publisher.py"
+  "local_nodes/imu_yaw_odometry_core.py"
+  "local_nodes/imu_yaw_odometry.py"
 )
 
 mkdir -p "${BACKUP_ROOT}"
