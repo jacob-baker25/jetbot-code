@@ -91,7 +91,7 @@ class ImuYawOdometryTest(unittest.TestCase):
         )
         watchdog.observe(1.0)
         watchdog.check(5.0)  # A first-sample pause is allowed during startup.
-        self.assertTrue(watchdog.observe(5.1))
+        self.assertAlmostEqual(watchdog.observe(5.1), 4.1)
         self.assertEqual(watchdog.consecutive_samples, 1)
         watchdog.observe(5.4)
         watchdog.observe(5.7)
@@ -110,6 +110,20 @@ class ImuYawOdometryTest(unittest.TestCase):
         watchdog.observe(1.2)
         self.assertFalse(watchdog.ready)
         watchdog.check(5.0)
+
+    def test_watchdog_tolerates_measured_scan_gap_below_runtime_limit(self):
+        watchdog = core.StartupAwareWatchdog(
+            0.0, stable_samples=2, startup_timeout_s=20.0,
+            stale_timeout_s=2.0, stable_duration_s=0.1
+        )
+        watchdog.observe(1.0)
+        watchdog.observe(1.2)
+        self.assertTrue(watchdog.ready)
+        watchdog.check(3.0)
+        self.assertAlmostEqual(watchdog.observe(2.542), 1.342)
+        watchdog.check(4.4)
+        with self.assertRaises(core.StreamTimingError):
+            watchdog.check(4.6)
 
     def test_watchdog_fails_if_stream_never_stabilizes(self):
         watchdog = core.StartupAwareWatchdog(

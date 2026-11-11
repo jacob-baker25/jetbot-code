@@ -2340,7 +2340,7 @@ class MappingSession(Node):
                         "output_odom_topic": "/odom_rf2o",
                         "max_imu_gap_s": 0.10,
                         "max_imu_stale_s": 0.50,
-                        "max_raw_odom_stale_s": 1.00,
+                        "max_raw_odom_stale_s": 2.00,
                         "max_fusion_wait_s": 1.00,
                         "raw_odom_stable_samples": 20,
                         "raw_odom_stable_duration_s": 3.0,

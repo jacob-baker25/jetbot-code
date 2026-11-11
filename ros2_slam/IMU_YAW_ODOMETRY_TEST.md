@@ -20,9 +20,11 @@ In `imu_yaw` mode:
 The mode exits on nonfinite/reversed IMU data, an IMU gap over 100 ms, an IMU
 stream stale over 500 ms, unexpected frames, or non-increasing raw odometry
 stamps. Raw odometry gets at most 20 seconds to establish at least 20 messages
-over three continuous seconds. A startup gap over one second resets that
+over three continuous seconds. A startup gap over two seconds resets that
 qualification window rather than triggering a runtime failure. Only after the
-continuous window passes is the strict one-second stale guard armed. A queued
+continuous window passes is the strict two-second stale guard armed. This is
+above the measured 1.342-second RF2O gap in the synchronized baseline capture,
+while still bounding loss of scan-derived translation. A queued
 odometry message may wait at most one second for matching IMU time. Input
 receipt and fused-output counts are reported separately, so an input failure
 cannot be mislabeled as a fusion synchronization failure.
@@ -53,15 +55,15 @@ Phidget publisher.
 source /opt/ros/eloquent/setup.bash
 source ~/autochair_ros2_ws/install/slam_toolbox/share/slam_toolbox/local_setup.bash
 cd ~/autochair_ros2_ws/local_nodes
-python3 mapping_session.py imu_yaw_smoke_06 euclidean_heading narrow imu_yaw
+python3 mapping_session.py imu_yaw_smoke_07 euclidean_heading narrow imu_yaw
 ```
 
 Required output includes `Odometry mode: imu_yaw`, an odometry-source PASS,
 20/20 scan-TF, and stationary-preflight PASS. Press `Q` without moving. Inspect:
 
 ```bash
-EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_06_* | head -1)
-grep -E 'IMU_YAW_ODOM_(READY|FATAL|STATUS)' "$EXP/imu_yaw_odom.log"
+EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_07_* | head -1)
+grep -E 'IMU_YAW_ODOM_(STARTUP_GAP|RUNTIME_GAP|READY|FATAL|STATUS)' "$EXP/imu_yaw_odom.log"
 grep -E 'queue drops|invalid|No TF/odom' "$EXP/imu.log" | tail
 ```
 

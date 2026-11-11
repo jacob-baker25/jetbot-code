@@ -20,7 +20,7 @@ RAW_ODOM_TOPIC = "/odom_rf2o_raw"
 OUTPUT_ODOM_TOPIC = "/odom_rf2o"
 MAX_IMU_GAP_S = 0.10
 MAX_IMU_STALE_S = 0.50
-MAX_ODOM_STALE_S = 1.00
+MAX_ODOM_STALE_S = 2.00
 MAX_FUSION_WAIT_S = 1.00
 ODOM_STABLE_SAMPLES = 20
 ODOM_STABLE_DURATION_S = 3.0
@@ -164,13 +164,21 @@ def main():
         state["raw_received"] += 1
         state["last_raw_odom_receipt"] = now
         was_ready = odom_watchdog.ready
-        startup_window_reset = odom_watchdog.observe(now)
-        if startup_window_reset:
+        observed_gap_s = odom_watchdog.observe(now)
+        if (observed_gap_s is not None and
+                observed_gap_s > MAX_ODOM_STALE_S):
             node.get_logger().warn(
                 (
                     "IMU_YAW_ODOM_STARTUP_GAP gap={:.3f}s; "
                     "continuous qualification restarted"
-                ).format(odom_watchdog.last_gap_s)
+                ).format(observed_gap_s)
+            )
+        elif (was_ready and observed_gap_s is not None and
+                observed_gap_s > 0.50):
+            node.get_logger().warn(
+                "IMU_YAW_ODOM_RUNTIME_GAP recovered_gap={:.3f}s".format(
+                    observed_gap_s
+                )
             )
         process_pending()
         if not was_ready and odom_watchdog.ready:

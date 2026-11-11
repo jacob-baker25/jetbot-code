@@ -182,13 +182,14 @@ class StartupAwareWatchdog:
         return max(0.0, end_s - self.stable_start_s)
 
     def observe(self, now_s):
-        reset = False
+        observed_gap_s = None
+        if self.last_sample_s is not None:
+            observed_gap_s = now_s - self.last_sample_s
         if not self.ready:
             if (self.last_sample_s is None or
-                    now_s - self.last_sample_s > self.stale_timeout_s):
+                    observed_gap_s > self.stale_timeout_s):
                 if self.last_sample_s is not None:
-                    self.last_gap_s = now_s - self.last_sample_s
-                    reset = True
+                    self.last_gap_s = observed_gap_s
                 self.stable_start_s = now_s
                 self.consecutive_samples = 0
             self.consecutive_samples += 1
@@ -198,7 +199,7 @@ class StartupAwareWatchdog:
                 self.consecutive_samples >= self.stable_samples and
                 self.stable_elapsed_s() >= self.stable_duration_s):
             self._ready = True
-        return reset
+        return observed_gap_s
 
     def check(self, now_s):
         if self.ready:
