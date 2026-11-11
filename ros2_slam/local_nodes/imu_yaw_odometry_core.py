@@ -155,24 +155,50 @@ class PlanarYawFusion:
 
 
 class StartupAwareWatchdog:
-    """Bound startup separately from strict steady-state stream health."""
+    """Require a continuous startup window before arming a strict stale gate."""
 
     def __init__(self, start_s, stable_samples=10, startup_timeout_s=20.0,
-                 stale_timeout_s=1.0):
+                 stale_timeout_s=1.0, stable_duration_s=3.0):
         self.start_s = start_s
         self.stable_samples = stable_samples
         self.startup_timeout_s = startup_timeout_s
         self.stale_timeout_s = stale_timeout_s
-        self.samples = 0
+        self.stable_duration_s = stable_duration_s
+        self.total_samples = 0
+        self.consecutive_samples = 0
+        self.stable_start_s = None
         self.last_sample_s = None
+        self.last_gap_s = None
+        self._ready = False
 
     @property
     def ready(self):
-        return self.samples >= self.stable_samples
+        return self._ready
+
+    def stable_elapsed_s(self, now_s=None):
+        if self.stable_start_s is None:
+            return 0.0
+        end_s = self.last_sample_s if now_s is None else now_s
+        return max(0.0, end_s - self.stable_start_s)
 
     def observe(self, now_s):
-        self.samples += 1
+        reset = False
+        if not self.ready:
+            if (self.last_sample_s is None or
+                    now_s - self.last_sample_s > self.stale_timeout_s):
+                if self.last_sample_s is not None:
+                    self.last_gap_s = now_s - self.last_sample_s
+                    reset = True
+                self.stable_start_s = now_s
+                self.consecutive_samples = 0
+            self.consecutive_samples += 1
+        self.total_samples += 1
         self.last_sample_s = now_s
+        if (not self.ready and
+                self.consecutive_samples >= self.stable_samples and
+                self.stable_elapsed_s() >= self.stable_duration_s):
+            self._ready = True
+        return reset
 
     def check(self, now_s):
         if self.ready:
@@ -180,7 +206,12 @@ class StartupAwareWatchdog:
                 raise StreamTimingError("raw odometry became stale")
         elif now_s - self.start_s > self.startup_timeout_s:
             raise StreamTimingError(
-                "raw odometry did not stabilize: {}/{} fused samples".format(
-                    self.samples, self.stable_samples
+                (
+                    "raw odometry did not stabilize: total={} consecutive={}/{} "
+                    "continuous={:.3f}/{:.3f}s"
+                ).format(
+                    self.total_samples, self.consecutive_samples,
+                    self.stable_samples, self.stable_elapsed_s(),
+                    self.stable_duration_s
                 )
             )

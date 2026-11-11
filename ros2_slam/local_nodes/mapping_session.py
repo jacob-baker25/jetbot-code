@@ -730,12 +730,24 @@ class MappingSession(Node):
         passed = False
         errors = []
         initial_count = self.odom_message_count
-        deadline = time.monotonic() + 3.0
+        deadline = time.monotonic() + 5.0
         required_new_messages = 5
+        qualification_required = self.odom_mode == "imu_yaw"
+        qualification_seen = not qualification_required
         while time.monotonic() < deadline:
             self.require_processes_alive()
             rclpy.spin_once(self, timeout_sec=0.1)
-            if self.odom_message_count - initial_count >= required_new_messages:
+            if qualification_required:
+                try:
+                    with open(
+                        self.process_log_paths["imu_yaw_odom"],
+                        "r", errors="replace"
+                    ) as stream:
+                        qualification_seen = "IMU_YAW_ODOM_READY" in stream.read()
+                except (IOError, OSError, KeyError):
+                    qualification_seen = False
+            if (self.odom_message_count - initial_count >= required_new_messages and
+                    qualification_seen):
                 break
         observed = self.odom_message_count - initial_count
         age_s = None
@@ -746,6 +758,10 @@ class MappingSession(Node):
                 "Only {} new /odom_rf2o messages in readiness window; need {}".format(
                     observed, required_new_messages
                 )
+            )
+        if qualification_required and not qualification_seen:
+            errors.append(
+                "IMU-yaw raw odometry did not complete continuous startup qualification"
             )
         if age_s is None or age_s < -0.1 or age_s > 0.5:
             errors.append("Final /odom_rf2o age outside [-0.1, 0.5] seconds: {}".format(
@@ -759,6 +775,7 @@ class MappingSession(Node):
             "new_messages_observed": observed,
             "required_new_messages": required_new_messages,
             "final_message_age_s": age_s,
+            "qualification_marker_seen": qualification_seen,
             "errors": errors,
         }
 
@@ -2325,7 +2342,8 @@ class MappingSession(Node):
                         "max_imu_stale_s": 0.50,
                         "max_raw_odom_stale_s": 1.00,
                         "max_fusion_wait_s": 1.00,
-                        "raw_odom_stable_samples": 10,
+                        "raw_odom_stable_samples": 20,
+                        "raw_odom_stable_duration_s": 3.0,
                         "raw_odom_startup_timeout_s": 20.0,
                         "rf2o_publish_tf": False,
                     }

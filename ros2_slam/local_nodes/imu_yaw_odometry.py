@@ -22,7 +22,8 @@ MAX_IMU_GAP_S = 0.10
 MAX_IMU_STALE_S = 0.50
 MAX_ODOM_STALE_S = 1.00
 MAX_FUSION_WAIT_S = 1.00
-ODOM_STABLE_SAMPLES = 10
+ODOM_STABLE_SAMPLES = 20
+ODOM_STABLE_DURATION_S = 3.0
 ODOM_STARTUP_TIMEOUT_S = 20.0
 
 
@@ -58,6 +59,7 @@ def main():
         stable_samples=ODOM_STABLE_SAMPLES,
         startup_timeout_s=ODOM_STARTUP_TIMEOUT_S,
         stale_timeout_s=MAX_ODOM_STALE_S,
+        stable_duration_s=ODOM_STABLE_DURATION_S,
     )
     state = {
         "fatal": None,
@@ -162,7 +164,14 @@ def main():
         state["raw_received"] += 1
         state["last_raw_odom_receipt"] = now
         was_ready = odom_watchdog.ready
-        odom_watchdog.observe(now)
+        startup_window_reset = odom_watchdog.observe(now)
+        if startup_window_reset:
+            node.get_logger().warn(
+                (
+                    "IMU_YAW_ODOM_STARTUP_GAP gap={:.3f}s; "
+                    "continuous qualification restarted"
+                ).format(odom_watchdog.last_gap_s)
+            )
         process_pending()
         if not was_ready and odom_watchdog.ready:
             node.get_logger().info(
@@ -234,12 +243,17 @@ def main():
                 node.get_logger().info(
                     (
                         "IMU_YAW_ODOM_STATUS raw_received={} published={} "
-                        "pending={} too_old_drops={} raw_age={} fused_age={}"
+                        "pending={} too_old_drops={} raw_age={} fused_age={} "
+                        "startup_consecutive={} startup_continuous_s={:.3f} "
+                        "qualified={}"
                     ).format(
                         state["raw_received"], state["published"],
                         len(synchronizer.pending), state["too_old_drops"],
                         "{:.3f}".format(raw_age) if raw_age is not None else "none",
                         "{:.3f}".format(fused_age) if fused_age is not None else "none",
+                        odom_watchdog.consecutive_samples,
+                        odom_watchdog.stable_elapsed_s(),
+                        odom_watchdog.ready,
                     )
                 )
                 next_report = now + 5.0
