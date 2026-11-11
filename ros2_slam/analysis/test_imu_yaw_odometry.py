@@ -116,6 +116,16 @@ class ImuYawOdometryTest(unittest.TestCase):
         self.assertIn("exec env PYTHONUNBUFFERED=1 {}", text)
         self.assertIn("Required ROS process exited during startup", text)
 
+    def test_fusion_uses_separate_nodes_two_threads_and_lock(self):
+        text = NODE.read_text(encoding="utf-8")
+        self.assertIn('Node("imu_yaw_odometry_imu_input")', text)
+        self.assertIn("MultiThreadedExecutor(num_threads=2)", text)
+        self.assertIn("executor.add_node(node)", text)
+        self.assertIn("executor.add_node(imu_node)", text)
+        self.assertIn("threading.RLock()", text)
+        self.assertIn("with state_lock:", text)
+        self.assertIn("executor=two_node_two_thread", text)
+
     def test_session_verifies_live_odom_messages_not_buffered_log_text(self):
         tree = ast.parse(SESSION.read_text(encoding="utf-8"))
         cls = next(node for node in tree.body if isinstance(node, ast.ClassDef)

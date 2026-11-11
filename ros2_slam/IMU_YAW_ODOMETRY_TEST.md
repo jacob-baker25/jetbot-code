@@ -14,8 +14,12 @@ In `imu_yaw` mode:
    RF2O message until the IMU timeline brackets its timestamp. It then
    interpolates integrated yaw at that timestamp and composes RF2O's relative
    body translation using that yaw.
-4. The node publishes `/odom_rf2o` and the only `odom -> base_link` TF.
-5. Slam Toolbox continues to publish `map -> odom`.
+4. Raw odometry and IMU subscriptions live on separate ROS nodes in one
+   process and are dispatched by a two-thread executor. A shared lock protects
+   timestamp and fusion state while preventing the 50 Hz IMU subscription from
+   starving the roughly 10 Hz odometry subscription on ROS 2 Eloquent.
+5. The node publishes `/odom_rf2o` and the only `odom -> base_link` TF.
+6. Slam Toolbox continues to publish `map -> odom`.
 
 The mode exits on nonfinite/reversed IMU data, an IMU gap over 100 ms, an IMU
 stream stale over 500 ms, unexpected frames, or non-increasing raw odometry
@@ -51,14 +55,14 @@ Phidget publisher.
 source /opt/ros/eloquent/setup.bash
 source ~/autochair_ros2_ws/install/slam_toolbox/share/slam_toolbox/local_setup.bash
 cd ~/autochair_ros2_ws/local_nodes
-python3 mapping_session.py imu_yaw_smoke_04 euclidean_heading narrow imu_yaw
+python3 mapping_session.py imu_yaw_smoke_05 euclidean_heading narrow imu_yaw
 ```
 
 Required output includes `Odometry mode: imu_yaw`, an odometry-source PASS,
 20/20 scan-TF, and stationary-preflight PASS. Press `Q` without moving. Inspect:
 
 ```bash
-EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_04_* | head -1)
+EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_05_* | head -1)
 grep -E 'IMU_YAW_ODOM_(READY|FATAL|STATUS)' "$EXP/imu_yaw_odom.log"
 grep -E 'queue drops|invalid|No TF/odom' "$EXP/imu.log" | tail
 ```
