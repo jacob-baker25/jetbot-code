@@ -104,6 +104,8 @@ MAX_STATIONARY_SLAM_HEADING_DEG = 7.5
 
 CHECKPOINT_SETTLE_SECONDS = 0.5
 FINAL_SETTLE_SECONDS = 5.0
+CHECKPOINT_MAX_AGE_SECONDS = 0.5
+CHECKPOINT_FRESH_WAIT_SECONDS = 2.0
 
 
 # ============================================================
@@ -267,6 +269,8 @@ class MappingSession(Node):
         self.last_motor_command = 0.0
 
         self.last_odom = None
+        self.last_raw_odom = None
+        self.checkpoint_failures = []
         self.odom_message_count = 0
         self.last_map = None
 
@@ -357,6 +361,11 @@ class MappingSession(Node):
             10
         )
 
+        if self.odom_mode == "imu_yaw":
+            self.create_subscription(
+                Odometry, "/odom_rf2o_raw", self.raw_odom_callback, 10
+            )
+
         self.create_subscription(
             OccupancyGrid,
             "/map",
@@ -417,6 +426,15 @@ class MappingSession(Node):
     def map_callback(self, msg):
 
         self.last_map = msg
+
+    def raw_odom_callback(self, msg):
+        q = msg.pose.pose.orientation
+        self.last_raw_odom = {
+            "stamp_s": msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9,
+            "x": float(msg.pose.pose.position.x),
+            "y": float(msg.pose.pose.position.y),
+            "yaw_deg": math.degrees(quaternion_to_yaw(q.x, q.y, q.z, q.w)),
+        }
 
 
     def delayed_scan_callback(self, msg):
@@ -1526,7 +1544,7 @@ class MappingSession(Node):
         if slam is None:
             return None
 
-        return {
+        snapshot = {
             "rf2o": dict(
                 self.last_odom
             ),
@@ -1534,6 +1552,24 @@ class MappingSession(Node):
                 slam
             )
         }
+        raw = self.last_raw_odom if self.odom_mode == "imu_yaw" else self.last_odom
+        if raw is not None:
+            snapshot["raw_rf2o"] = dict(raw)
+        return snapshot
+
+    def checkpoint_ages(self, snapshot):
+        """Check measured pose times, not just recent callback execution."""
+        now = self.get_clock().now().nanoseconds / 1e9
+        ages = {}
+        for key in ("rf2o", "slam", "raw_rf2o"):
+            pose = snapshot.get(key) if snapshot else None
+            if pose is None or not math.isfinite(pose.get("stamp_s", float("nan"))):
+                return None
+            age = now - pose["stamp_s"]
+            if not -0.05 <= age <= CHECKPOINT_MAX_AGE_SECONDS:
+                return None
+            ages[key] = age
+        return ages
 
 
     def run_stationary_preflight(self):
@@ -1854,19 +1890,20 @@ class MappingSession(Node):
             CHECKPOINT_SETTLE_SECONDS
         )
 
-        snapshot = (
-            self.snapshot_pose()
-        )
-
-        if snapshot is None:
-
-            print()
-            print(
-                "Checkpoint failed: "
-                "pose unavailable."
-            )
-            print()
-
+        deadline = time.monotonic() + CHECKPOINT_FRESH_WAIT_SECONDS
+        snapshot = self.snapshot_pose()
+        ages = self.checkpoint_ages(snapshot)
+        while ages is None and rclpy.ok() and time.monotonic() < deadline:
+            self.spin_for(0.05)
+            snapshot = self.snapshot_pose()
+            ages = self.checkpoint_ages(snapshot)
+        if ages is None:
+            self.checkpoint_failures.append({
+                "label": label, "time_unix": time.time(),
+                "reason": "pose missing, future-dated or older than 0.5 seconds",
+            })
+            print("Checkpoint NOT recorded: poses unavailable or stale. Robot stopped; retry L when data recovers.")
+            self.write_results()
             return None
 
         checkpoint = {
@@ -1877,6 +1914,9 @@ class MappingSession(Node):
             "time_unix": time.time(),
             "rf2o": snapshot["rf2o"],
             "slam": snapshot["slam"],
+            "raw_rf2o": snapshot["raw_rf2o"],
+            "pose_age_s": ages,
+            "odom_mode": self.odom_mode,
         }
 
         self.checkpoints.append(
@@ -1953,7 +1993,7 @@ class MappingSession(Node):
 
         print(
             (
-                "RF2O  "
+                "ODOM  "
                 "x={:+.3f} m  "
                 "y={:+.3f} m  "
                 "yaw={:+.1f} deg"
@@ -1976,6 +2016,13 @@ class MappingSession(Node):
                 slam["yaw_deg"]
             )
         )
+
+        raw = checkpoint["raw_rf2o"]
+        print("RAW RF2O x={:+.3f} m y={:+.3f} m yaw={:+.1f} deg".format(
+            raw["x"], raw["y"], raw["yaw_deg"]))
+        print("Pose ages: odom={:.3f}s raw={:.3f}s SLAM={:.3f}s".format(
+            checkpoint["pose_age_s"]["rf2o"], checkpoint["pose_age_s"]["raw_rf2o"],
+            checkpoint["pose_age_s"]["slam"]))
 
         if len(
             self.checkpoints
@@ -2331,6 +2378,9 @@ class MappingSession(Node):
             "preflight": self.preflight_results,
 
             "configuration": {
+                "session_telemetry_version": 2,
+                "legacy_rf2o_field_source": "IMU-assisted odometry" if self.odom_mode == "imu_yaw" else "raw RF2O",
+                "checkpoint_max_age_s": CHECKPOINT_MAX_AGE_SECONDS,
                 "matcher_profile": self.matcher_profile,
                 "odom_mode": self.odom_mode,
                 "imu_yaw_configuration": (
@@ -2399,6 +2449,7 @@ class MappingSession(Node):
             "checkpoints": (
                 self.checkpoints
             ),
+            "checkpoint_failures": self.checkpoint_failures,
 
             "segments": segments,
         }
@@ -2697,6 +2748,8 @@ class MappingSession(Node):
         )
 
         self.print_controls()
+        print("ODOM display: {}. RAW RF2O is recorded separately at checkpoints.".format(
+            "IMU yaw + RF2O translation" if self.odom_mode == "imu_yaw" else "RF2O"))
 
         try:
 
@@ -2720,7 +2773,10 @@ class MappingSession(Node):
                         [sys.stdin],
                         [],
                         [],
-                        0.03
+                        # spin_once already provides a bounded idle wait.
+                        # Do not limit all ROS callbacks to ~33/s by waiting
+                        # another 30 ms for a key after every callback.
+                        0.0
                     )
                 )
 
@@ -2843,7 +2899,7 @@ class MappingSession(Node):
         print()
         print("=" * 70)
         print(
-            "EXPERIMENT COMPLETE"
+            "EXPERIMENT COMPLETE" if self.run_status == "complete" else "EXPERIMENT INCOMPLETE"
         )
         print("=" * 70)
 
@@ -3064,9 +3120,12 @@ class MappingSession(Node):
         # --------------------------------------------
 
         self.run_status = "running"
-        self.capture_checkpoint(
-            "start"
-        )
+        if self.capture_checkpoint("start") is None:
+            self.run_status = "failed_start_checkpoint"
+            self.session_end_unix = time.time()
+            self.write_results()
+            self.stop_stack()
+            return 8
 
         self.teleop_loop()
 
@@ -3083,15 +3142,13 @@ class MappingSession(Node):
             FINAL_SETTLE_SECONDS
         )
 
-        self.capture_checkpoint(
-            "final"
-        )
+        final_checkpoint = self.capture_checkpoint("final")
 
         self.session_end_unix = (
             time.time()
         )
 
-        self.run_status = "complete"
+        self.run_status = "complete" if final_checkpoint is not None else "failed_final_checkpoint"
 
         self.save_map()
 
@@ -3102,7 +3159,7 @@ class MappingSession(Node):
 
         self.stop_stack()
 
-        return 0
+        return 0 if final_checkpoint is not None else 9
 
 
 # ============================================================

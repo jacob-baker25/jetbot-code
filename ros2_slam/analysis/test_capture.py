@@ -47,7 +47,7 @@ class CaptureTest(unittest.TestCase):
                            env=env,check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             for name in ['mapping_session.py','matcher_profiles.py','capture_sensors.py',
                          'phidget_probe.py','imu_planar.py','phidget_imu_publisher.py',
-                         'imu_yaw_odometry_core.py','imu_yaw_odometry.py']:
+                         'imu_yaw_odometry_core.py','imu_yaw_odometry.py','observe_imu_timing.py']:
                 self.assertEqual((target/name).read_bytes(),(ROOT/'local_nodes'/name).read_bytes())
             backup=list((workspace/'backups').glob('*/mapping_session.py'))
             self.assertEqual(len(backup),1)
@@ -61,6 +61,8 @@ class CaptureTest(unittest.TestCase):
                      ROOT/'local_nodes/imu_yaw_odometry_core.py',
                      ROOT/'local_nodes/imu_yaw_odometry.py',
                      ROOT/'local_nodes/mapping_session.py',
+                     ROOT/'local_nodes/observe_imu_timing.py',
+                     ROOT/'analysis/check_session_timing.py',
                      ROOT/'analysis/summarize_capture.py']:
             ast.parse(path.read_text(encoding='utf-8'), feature_version=(3,6))
 

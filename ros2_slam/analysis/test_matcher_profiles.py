@@ -182,9 +182,12 @@ class ProfilesTest(unittest.TestCase):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(str(ROOT / filename), str(destination))
             deployed_script = staging / "deploy_scan_gate_diagnostics.sh"
-            deployed_script.write_text(script)
-            env = dict(os.environ, AUTOCHAIR_WS=str(workspace))
-            subprocess.run(["bash", str(deployed_script)], env=env, check=True,
+            # Bash fixtures need Unix line endings and paths on Windows too.
+            with deployed_script.open("w", newline="\n") as stream:
+                stream.write(script)
+            env = dict(os.environ, AUTOCHAIR_WS=workspace.as_posix())
+            bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which("bash")
+            subprocess.run([bash, deployed_script.as_posix()], env=env, check=True,
                            stdout=subprocess.PIPE)
             for filename in files:
                 target = workspace / filename if filename.startswith("local_nodes/") else workspace / "src" / filename
