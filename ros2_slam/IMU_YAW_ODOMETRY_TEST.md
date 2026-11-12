@@ -8,7 +8,9 @@ use direct RF2O odometry and TF.
 In `imu_yaw` mode:
 
 1. The qualified Phidget publisher zeros while the robot is stationary and
-   publishes `/imu/data_raw` in `base_link`.
+   publishes `/imu/data_raw` in `base_link`. Publisher and fusion subscriber
+   use best-effort QoS with depth 100 (two seconds at 50 Hz) so ordinary Jetson
+   scheduling delays do not overflow the default five-message sensor queue.
 2. RF2O publishes `/odom_rf2o_raw` with `publish_tf=false`.
 3. `imu_yaw_odometry.py` buffers device-stamped yaw rates and queues each raw
    RF2O message until the IMU timeline brackets its timestamp. It then
@@ -55,16 +57,16 @@ Phidget publisher.
 source /opt/ros/eloquent/setup.bash
 source ~/autochair_ros2_ws/install/slam_toolbox/share/slam_toolbox/local_setup.bash
 cd ~/autochair_ros2_ws/local_nodes
-python3 mapping_session.py imu_yaw_smoke_07 euclidean_heading narrow imu_yaw
+python3 mapping_session.py imu_yaw_smoke_08 euclidean_heading narrow imu_yaw
 ```
 
 Required output includes `Odometry mode: imu_yaw`, an odometry-source PASS,
 20/20 scan-TF, and stationary-preflight PASS. Press `Q` without moving. Inspect:
 
 ```bash
-EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_07_* | head -1)
+EXP=$(ls -dt ~/autochair_ros2_ws/experiments/imu_yaw_smoke_08_* | head -1)
 grep -E 'IMU_YAW_ODOM_(STARTUP_GAP|RUNTIME_GAP|READY|FATAL|STATUS)' "$EXP/imu_yaw_odom.log"
-grep -E 'queue drops|invalid|No TF/odom' "$EXP/imu.log" | tail
+grep -E 'IMU_SOURCE_GAP|queue drops|invalid|No TF/odom' "$EXP/imu.log" | tail
 ```
 
 Any FATAL marker blocks motion testing. A healthy status line has continuously

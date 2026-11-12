@@ -17,6 +17,8 @@ from imu_planar import anchored_stamp_ns, robot_yaw_rate_rad_s, split_stamp_ns
 
 GYRO_Z_VARIANCE = 1.0e-5
 UNUSED_AXIS_VARIANCE = 1.0e6
+IMU_QOS_DEPTH = 100
+SOURCE_GAP_REPORT_MS = 100.0
 
 
 def main():
@@ -37,7 +39,8 @@ def main():
     from Phidget22.Devices.Spatial import Spatial
     import rclpy
     from rclpy.node import Node
-    from rclpy.qos import qos_profile_sensor_data
+    from rclpy.qos import (QoSDurabilityPolicy, QoSProfile,
+                           QoSReliabilityPolicy)
     from sensor_msgs.msg import Imu
 
     spatial = Spatial()
@@ -45,6 +48,9 @@ def main():
     state = {"drops": 0, "invalid": 0, "error": None}
     node = None
     published = 0
+    last_device_ms = None
+    max_device_gap_ms = 0.0
+    source_gaps_over_limit = 0
 
     def on_data(device, acceleration, angular_rate, magnetic_field, timestamp):
         if not math.isfinite(timestamp) or not math.isfinite(angular_rate[2]):
@@ -75,11 +81,17 @@ def main():
 
         rclpy.init()
         node = Node("phidget_planar_imu_publisher")
-        publisher = node.create_publisher(Imu, args.topic, qos_profile_sensor_data)
+        imu_qos = QoSProfile(depth=IMU_QOS_DEPTH)
+        imu_qos.reliability = QoSReliabilityPolicy.BEST_EFFORT
+        imu_qos.durability = QoSDurabilityPolicy.VOLATILE
+        publisher = node.create_publisher(Imu, args.topic, imu_qos)
         spatial.setOnSpatialDataHandler(on_data)
         print(
-            "Publishing {} in {}: robot yaw rate = -raw sensor Z. No TF/odom.".format(
-                args.topic, args.frame
+            (
+                "Publishing {} in {}: robot yaw rate = -raw sensor Z. "
+                "QoS=best_effort depth={}. No TF/odom."
+            ).format(
+                args.topic, args.frame, IMU_QOS_DEPTH
             ),
             flush=True,
         )
@@ -100,6 +112,18 @@ def main():
                     raise RuntimeError("No valid Spatial sample for three seconds")
                 continue
             last_sample = time.monotonic()
+            if last_device_ms is not None:
+                device_gap_ms = device_ms - last_device_ms
+                max_device_gap_ms = max(max_device_gap_ms, device_gap_ms)
+                if device_gap_ms > SOURCE_GAP_REPORT_MS:
+                    source_gaps_over_limit += 1
+                    print(
+                        "IMU_SOURCE_GAP device_gap_ms={:.3f}".format(
+                            device_gap_ms
+                        ),
+                        flush=True,
+                    )
+            last_device_ms = device_ms
             now_ns = node.get_clock().now().nanoseconds
             if anchor_device_ms is None:
                 anchor_device_ms = device_ms
@@ -134,8 +158,12 @@ def main():
             now = time.monotonic()
             if now >= next_report:
                 print(
-                    "Published {} samples; {} queue drops; {} invalid".format(
-                        published, state["drops"], state["invalid"]
+                    (
+                        "Published {} samples; {} queue drops; {} invalid; "
+                        "source_gaps_gt_100ms={}; max_device_gap_ms={:.3f}"
+                    ).format(
+                        published, state["drops"], state["invalid"],
+                        source_gaps_over_limit, max_device_gap_ms
                     ),
                     flush=True,
                 )
@@ -152,9 +180,13 @@ def main():
         except (NameError, RuntimeError):
             pass
         print(
-            "Stopped after {} published samples; {} queue drops; {} invalid. "
-            "No TF/odom published.".format(
-                published, state["drops"], state["invalid"]
+            (
+                "Stopped after {} published samples; {} queue drops; {} invalid; "
+                "source_gaps_gt_100ms={}; max_device_gap_ms={:.3f}. "
+                "No TF/odom published."
+            ).format(
+                published, state["drops"], state["invalid"],
+                source_gaps_over_limit, max_device_gap_ms
             ),
             flush=True,
         )

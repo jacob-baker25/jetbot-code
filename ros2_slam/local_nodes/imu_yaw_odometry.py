@@ -25,6 +25,7 @@ MAX_FUSION_WAIT_S = 1.00
 ODOM_STABLE_SAMPLES = 20
 ODOM_STABLE_DURATION_S = 3.0
 ODOM_STARTUP_TIMEOUT_S = 20.0
+IMU_QOS_DEPTH = 100
 
 
 def message_stamp_s(message):
@@ -43,7 +44,8 @@ def main():
     from geometry_msgs.msg import TransformStamped
     from nav_msgs.msg import Odometry
     from rclpy.node import Node
-    from rclpy.qos import qos_profile_sensor_data
+    from rclpy.qos import (QoSDurabilityPolicy, QoSProfile,
+                           QoSReliabilityPolicy)
     from sensor_msgs.msg import Imu
     from tf2_ros import TransformBroadcaster
 
@@ -194,12 +196,18 @@ def main():
     odom_subscription = node.create_subscription(
         Odometry, RAW_ODOM_TOPIC, odom_callback, 10
     )
+    imu_qos = QoSProfile(depth=IMU_QOS_DEPTH)
+    imu_qos.reliability = QoSReliabilityPolicy.BEST_EFFORT
+    imu_qos.durability = QoSDurabilityPolicy.VOLATILE
     imu_subscription = node.create_subscription(
-        Imu, IMU_TOPIC, imu_callback, qos_profile_sensor_data
+        Imu, IMU_TOPIC, imu_callback, imu_qos
     )
     node.get_logger().info(
-        "Waiting for IMU and raw RF2O. Max IMU gap {:.3f}s; stale {:.3f}s.".format(
-            MAX_IMU_GAP_S, MAX_IMU_STALE_S
+        (
+            "Waiting for IMU and raw RF2O. IMU QoS=best_effort depth={}; "
+            "max IMU gap {:.3f}s; stale {:.3f}s."
+        ).format(
+            IMU_QOS_DEPTH, MAX_IMU_GAP_S, MAX_IMU_STALE_S
         )
     )
     next_report = time.monotonic() + 5.0

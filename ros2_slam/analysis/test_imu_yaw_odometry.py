@@ -144,6 +144,17 @@ class ImuYawOdometryTest(unittest.TestCase):
         self.assertIn("exec env PYTHONUNBUFFERED=1 {}", text)
         self.assertIn("Required ROS process exited during startup", text)
 
+    def test_imu_transport_uses_deep_best_effort_qos_at_both_ends(self):
+        node_text = NODE.read_text(encoding="utf-8")
+        publisher_text = (ROOT / "local_nodes" /
+                          "phidget_imu_publisher.py").read_text(encoding="utf-8")
+        for text in (node_text, publisher_text):
+            self.assertIn("IMU_QOS_DEPTH = 100", text)
+            self.assertIn("QoSReliabilityPolicy.BEST_EFFORT", text)
+            self.assertIn("QoSDurabilityPolicy.VOLATILE", text)
+        self.assertIn("IMU_SOURCE_GAP", publisher_text)
+        self.assertIn("max_device_gap_ms", publisher_text)
+
     def test_session_verifies_live_odom_messages_not_buffered_log_text(self):
         tree = ast.parse(SESSION.read_text(encoding="utf-8"))
         cls = next(node for node in tree.body if isinstance(node, ast.ClassDef)
@@ -183,7 +194,8 @@ class ImuYawOdometryTest(unittest.TestCase):
         self.assertTrue(result["qualification_marker_seen"])
 
     def test_python36_syntax(self):
-        for path in (CORE, NODE, SESSION):
+        for path in (CORE, NODE, SESSION,
+                     ROOT / "local_nodes" / "phidget_imu_publisher.py"):
             ast.parse(path.read_text(encoding="utf-8"), feature_version=(3, 6))
 
 

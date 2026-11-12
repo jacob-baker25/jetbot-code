@@ -2336,6 +2336,8 @@ class MappingSession(Node):
                 "imu_yaw_configuration": (
                     {
                         "imu_topic": "/imu/data_raw",
+                        "imu_qos_reliability": "best_effort",
+                        "imu_qos_depth": 100,
                         "raw_odom_topic": "/odom_rf2o_raw",
                         "output_odom_topic": "/odom_rf2o",
                         "max_imu_gap_s": 0.10,
