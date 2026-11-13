@@ -8,6 +8,12 @@ from ament_index_python.packages import get_package_share_directory
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     scan_distance_gate_mode = LaunchConfiguration('scan_distance_gate_mode')
+    params_file = LaunchConfiguration('params_file')
+    declare_params_file_argument = DeclareLaunchArgument(
+        'params_file',
+        default_value=(get_package_share_directory('slam_toolbox') +
+                       '/config/mapper_params_online_sync.yaml'),
+        description='Complete SLAM parameter file for this experiment')
 
     declare_use_sim_time_argument = DeclareLaunchArgument(
         'use_sim_time',
@@ -22,7 +28,7 @@ def generate_launch_description():
 
     start_sync_slam_toolbox_node = Node(
         parameters=[
-          get_package_share_directory("slam_toolbox") + '/config/mapper_params_online_sync.yaml',
+          params_file,
           {
             'use_sim_time': use_sim_time,
             'scan_distance_gate_mode': scan_distance_gate_mode
@@ -37,6 +43,7 @@ def generate_launch_description():
 
     ld.add_action(declare_use_sim_time_argument)
     ld.add_action(declare_scan_distance_gate_mode_argument)
+    ld.add_action(declare_params_file_argument)
     ld.add_action(start_sync_slam_toolbox_node)
 
     return ld

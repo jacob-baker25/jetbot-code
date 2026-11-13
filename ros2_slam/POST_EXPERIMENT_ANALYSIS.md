@@ -1,5 +1,14 @@
 # Post-experiment analysis and highest-value next step
 
+Historical analysis from November 2. For the current November 4 deployment and
+test procedure, follow [LAB_EXPERIMENT_PLAN.md](LAB_EXPERIMENT_PLAN.md).
+The heading-aware gate has since passed its handoff test (26 accepts, 27 Karto
+states), but the physical hallway map remained inaccurate. An audit also found
+that SMapper ignored YAML overrides. The current repair reads and verifies all
+28 internal mapper settings, preserves a baseline, and tests search width alone
+with the `narrow` profile. Earlier landmark and two-parameter tuning proposals
+are superseded. The required test environment remains the unchanged hallway.
+
 ## Executive decision
 
 Do not spend another lab run comparing `legacy` with `euclidean`, and do not
