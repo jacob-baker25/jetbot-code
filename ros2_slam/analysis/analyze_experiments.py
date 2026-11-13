@@ -285,7 +285,7 @@ def analyze_directory(path):
         validity = "exclude_mode_mismatch"
     elif profile and not config_passed.get("passed"):
         validity = "exclude_karto_config"
-    elif odom_mode == "imu_yaw" and not odom_source_passed.get("passed"):
+    elif odom_mode in ("imu_yaw", "imu_yaw_hold") and not odom_source_passed.get("passed"):
         validity = "exclude_odom_source"
     elif status != "complete":
         validity = "exclude_incomplete"

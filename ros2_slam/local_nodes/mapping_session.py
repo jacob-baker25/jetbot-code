@@ -35,6 +35,8 @@ from tf2_ros import (
 from jetbot import Robot
 from ament_index_python.packages import get_package_share_directory
 from matcher_profiles import PROFILE_FILES, expected_parameters, check_karto_config
+from session_report import (HEADING_LOG_COLUMNS, HEADING_LOG_NAME, Unwrapper, fmt,
+                            write_report)
 
 
 # ============================================================
@@ -44,6 +46,12 @@ from matcher_profiles import PROFILE_FILES, expected_parameters, check_karto_con
 WORKSPACE = os.path.expanduser("~/autochair_ros2_ws")
 LOCAL_NODES = os.path.join(WORKSPACE, "local_nodes")
 EXPERIMENT_ROOT = os.path.join(WORKSPACE, "experiments")
+
+# imu_yaw: integrated Phidget gyro yaw + RF2O translation.
+# imu_yaw_hold: the same, plus the publisher's stationary bias hold (imu_bias.py).
+# Mode checks inside methods spell out ("imu_yaw", "imu_yaw_hold") so methods
+# stay self-contained (analysis tests execute them in isolation).
+ODOM_MODES = ["rf2o", "imu_yaw", "imu_yaw_hold"]
 
 
 # ============================================================
@@ -234,8 +242,10 @@ class MappingSession(Node):
                 "phidget_imu_publisher.py",
                 "imu_yaw_odometry.py",
                 "imu_yaw_odometry_core.py",
+                "imu_bias.py",
+                "imu_planar.py",
             )
-            if self.odom_mode == "imu_yaw"
+            if self.odom_mode in ("imu_yaw", "imu_yaw_hold")
             else ()
         )
         for source_name in odom_source_names:
@@ -320,6 +330,21 @@ class MappingSession(Node):
             "rf2o_age_s",
         ])
 
+        # Readable per-session heading log (session_report.py makes the
+        # turn table and graphs from it when the stack stops).
+        self.motion_command = "stop"
+        self.heading_log_path = os.path.join(self.experiment_dir, HEADING_LOG_NAME)
+        self.heading_log_file = open(self.heading_log_path, "w", newline="")
+        self.log_files.append(self.heading_log_file)
+        self.heading_log_writer = csv.writer(self.heading_log_file)
+        self.heading_log_writer.writerow(HEADING_LOG_COLUMNS)
+        self.heading_unwrap = {
+            "odom": Unwrapper(), "raw": Unwrapper(),
+            "slam": Unwrapper(), "correction": Unwrapper(),
+        }
+        self.heading_log_error = None
+        self.heading_report_files = []
+
         self.stack_stopped = False
 
         self.stdin_fd = None
@@ -361,7 +386,7 @@ class MappingSession(Node):
             10
         )
 
-        if self.odom_mode == "imu_yaw":
+        if self.odom_mode in ("imu_yaw", "imu_yaw_hold"):
             self.create_subscription(
                 Odometry, "/odom_rf2o_raw", self.raw_odom_callback, 10
             )
@@ -419,6 +444,9 @@ class MappingSession(Node):
             ),
             "yaw_deg": float(
                 math.degrees(yaw)
+            ),
+            "yaw_rate_dps": float(
+                math.degrees(msg.twist.twist.angular.z)
             )
         }
 
@@ -526,8 +554,43 @@ class MappingSession(Node):
 
         self.trajectory_sample_count += 1
 
+        self.record_heading_sample(rf2o, slam, map_to_odom, last_checkpoint)
+
         if self.trajectory_sample_count % 10 == 0:
             self.trajectory_file.flush()
+            self.heading_log_file.flush()
+
+
+    def record_heading_sample(self, odom, slam, map_to_odom, last_checkpoint):
+        """One readable row per trajectory sample. Logging problems are
+        reported once and never stop the session."""
+        if self.heading_log_error is not None:
+            return
+        try:
+            raw = self.last_raw_odom if self.odom_mode in ("imu_yaw", "imu_yaw_hold") else odom
+            now = time.time()
+            self.heading_log_writer.writerow([
+                fmt(now - self.session_start_unix, 2),
+                time.strftime("%H:%M:%S", time.localtime(now)) + ".{}".format(
+                    int((now % 1.0) * 10)
+                ),
+                self.motion_command,
+                last_checkpoint,
+                fmt(self.heading_unwrap["odom"].update(odom["yaw_deg"]), 2),
+                fmt(odom.get("yaw_rate_dps"), 2),
+                fmt(self.heading_unwrap["raw"].update(
+                    raw["yaw_deg"] if raw is not None else None
+                ), 2),
+                fmt(self.heading_unwrap["slam"].update(slam["yaw_deg"]), 2),
+                fmt(self.heading_unwrap["correction"].update(map_to_odom["yaw_deg"]), 2),
+                fmt(odom["x"], 3),
+                fmt(odom["y"], 3),
+                fmt(slam["x"], 3),
+                fmt(slam["y"], 3),
+            ])
+        except Exception as exc:
+            self.heading_log_error = str(exc)
+            print("\nHeading log disabled after error: {}".format(exc))
 
 
     # ========================================================
@@ -750,7 +813,7 @@ class MappingSession(Node):
         initial_count = self.odom_message_count
         deadline = time.monotonic() + 5.0
         required_new_messages = 5
-        qualification_required = self.odom_mode == "imu_yaw"
+        qualification_required = self.odom_mode in ("imu_yaw", "imu_yaw_hold")
         qualification_seen = not qualification_required
         while time.monotonic() < deadline:
             self.require_processes_alive()
@@ -942,14 +1005,17 @@ class MappingSession(Node):
         print()
 
         # 1. Qualified IMU zero, before the LiDAR motor introduces vibration.
-        if self.odom_mode == "imu_yaw":
+        if self.odom_mode in ("imu_yaw", "imu_yaw_hold"):
             self.start_process(
                 "imu",
                 (
                     "env LD_LIBRARY_PATH=\"$HOME/.local/phidget22/lib"
                     "${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\" "
-                    "python3 {}/phidget_imu_publisher.py"
-                ).format(LOCAL_NODES)
+                    "python3 {}/phidget_imu_publisher.py{}"
+                ).format(
+                    LOCAL_NODES,
+                    " --hold-still" if self.odom_mode == "imu_yaw_hold" else ""
+                )
             )
             time.sleep(4.0)
 
@@ -986,7 +1052,7 @@ class MappingSession(Node):
         time.sleep(1.0)
 
         # 4. Optional yaw-aided odometry subscriber.
-        if self.odom_mode == "imu_yaw":
+        if self.odom_mode in ("imu_yaw", "imu_yaw_hold"):
             self.start_process(
                 "imu_yaw_odom",
                 "python3 -u {}/imu_yaw_odometry.py".format(LOCAL_NODES)
@@ -1119,6 +1185,23 @@ class MappingSession(Node):
         print(
             "ROS stack stopped."
         )
+
+        self.write_heading_report()
+
+
+    def write_heading_report(self):
+        """Turn table + graphs from heading_log.csv. Never raises: a missing
+        plotting library or bad row must not hide the session's own results."""
+        print()
+        print("Writing heading report and graphs...")
+        try:
+            self.heading_report_files = write_report(self.experiment_dir)
+        except Exception as exc:
+            print("Heading report failed ({}). Re-run later:".format(exc))
+            print("  python3 {}/session_report.py {}".format(LOCAL_NODES, self.experiment_dir))
+            return
+        for path in self.heading_report_files:
+            print("  " + path)
 
 
     # ========================================================
@@ -1552,7 +1635,7 @@ class MappingSession(Node):
                 slam
             )
         }
-        raw = self.last_raw_odom if self.odom_mode == "imu_yaw" else self.last_odom
+        raw = self.last_raw_odom if self.odom_mode in ("imu_yaw", "imu_yaw_hold") else self.last_odom
         if raw is not None:
             snapshot["raw_rf2o"] = dict(raw)
         return snapshot
@@ -1786,6 +1869,8 @@ class MappingSession(Node):
 
     def forward(self):
 
+        self.motion_command = "forward"
+
         self.drive(
             self.speed,
             self.speed
@@ -1799,6 +1884,8 @@ class MappingSession(Node):
 
 
     def backward(self):
+
+        self.motion_command = "backward"
 
         self.drive(
             -self.speed,
@@ -1814,6 +1901,8 @@ class MappingSession(Node):
 
     def left(self):
 
+        self.motion_command = "left"
+
         self.drive(
             self.turn_speed,
             -self.turn_speed
@@ -1827,6 +1916,8 @@ class MappingSession(Node):
 
 
     def right(self):
+
+        self.motion_command = "right"
 
         self.drive(
             -self.turn_speed,
@@ -1853,6 +1944,7 @@ class MappingSession(Node):
             pass
 
         self.moving = False
+        self.motion_command = "stop"
 
 
     def update_watchdog(self):
@@ -2379,7 +2471,7 @@ class MappingSession(Node):
 
             "configuration": {
                 "session_telemetry_version": 2,
-                "legacy_rf2o_field_source": "IMU-assisted odometry" if self.odom_mode == "imu_yaw" else "raw RF2O",
+                "legacy_rf2o_field_source": "IMU-assisted odometry" if self.odom_mode in ("imu_yaw", "imu_yaw_hold") else "raw RF2O",
                 "checkpoint_max_age_s": CHECKPOINT_MAX_AGE_SECONDS,
                 "matcher_profile": self.matcher_profile,
                 "odom_mode": self.odom_mode,
@@ -2398,8 +2490,9 @@ class MappingSession(Node):
                         "raw_odom_stable_duration_s": 3.0,
                         "raw_odom_startup_timeout_s": 20.0,
                         "rf2o_publish_tf": False,
+                        "stationary_bias_hold": self.odom_mode == "imu_yaw_hold",
                     }
-                    if self.odom_mode == "imu_yaw"
+                    if self.odom_mode in ("imu_yaw", "imu_yaw_hold")
                     else None
                 ),
                 "odom_source_sha256": self.odom_source_sha256,
@@ -2749,7 +2842,7 @@ class MappingSession(Node):
 
         self.print_controls()
         print("ODOM display: {}. RAW RF2O is recorded separately at checkpoints.".format(
-            "IMU yaw + RF2O translation" if self.odom_mode == "imu_yaw" else "RF2O"))
+            "IMU yaw + RF2O translation" if self.odom_mode in ("imu_yaw", "imu_yaw_hold") else "RF2O"))
 
         try:
 
@@ -2970,6 +3063,10 @@ class MappingSession(Node):
             )
 
         print()
+        print("Heading log: {}".format(self.heading_log_path))
+        print("Turn report and graphs are written after the stack stops.")
+
+        print()
         print("Experiment directory:")
 
         print(
@@ -3179,7 +3276,7 @@ def main():
             "  python3 mapping_session.py "
             "EXPERIMENT_NAME "
             "[legacy|euclidean|euclidean_heading] [baseline|narrow] "
-            "[rf2o|imu_yaw]"
+            "[rf2o|imu_yaw|imu_yaw_hold]"
         )
 
         print()
@@ -3222,8 +3319,8 @@ def main():
         sys.exit(1)
 
     odom_mode = sys.argv[4] if len(sys.argv) == 5 else "rf2o"
-    if odom_mode not in ["rf2o", "imu_yaw"]:
-        print("Odometry mode must be 'rf2o' or 'imu_yaw'.")
+    if odom_mode not in ODOM_MODES:
+        print("Odometry mode must be 'rf2o', 'imu_yaw' or 'imu_yaw_hold'.")
         sys.exit(1)
 
     rclpy.init()

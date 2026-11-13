@@ -5,6 +5,11 @@ This node is intentionally passive: it publishes no TF, odometry, commands,
 orientation, acceleration, or magnetometer data. It always zeros the gyro while
 stationary before publishing. The only qualified mounting relationship is
 base_link yaw rate = -raw sensor Z rate.
+
+Optional --hold-still (used by the imu_yaw_hold odometry mode) publishes zero
+yaw rate while the gyro shows the robot is still and subtracts the residual
+bias learned there while moving; see imu_bias.py. Without it, output is
+unchanged.
 """
 
 import argparse
@@ -12,6 +17,7 @@ import math
 import queue
 import time
 
+from imu_bias import StationaryBiasHold
 from imu_planar import anchored_stamp_ns, robot_yaw_rate_rad_s, split_stamp_ns
 
 
@@ -29,6 +35,8 @@ def main():
     parser.add_argument("--serial", type=int, default=807962)
     parser.add_argument("--seconds", type=float, default=0.0,
                         help="Stop after this duration; zero means run until Ctrl-C")
+    parser.add_argument("--hold-still", action="store_true",
+                        help="Hold yaw while still and subtract learned residual bias")
     args = parser.parse_args()
     if args.interval_ms <= 0:
         parser.error("--interval-ms must be positive")
@@ -51,6 +59,14 @@ def main():
     last_device_ms = None
     max_device_gap_ms = 0.0
     source_gaps_over_limit = 0
+    bias_hold = StationaryBiasHold() if args.hold_still else None
+
+    def bias_text():
+        if bias_hold is None:
+            return "bias_hold=off"
+        return "bias_hold=on bias_dps={:+.4f} still_pct={:.1f}".format(
+            bias_hold.bias_dps, 100.0 * bias_hold.still_fraction()
+        )
 
     def on_data(device, acceleration, angular_rate, magnetic_field, timestamp):
         if not math.isfinite(timestamp) or not math.isfinite(angular_rate[2]):
@@ -89,9 +105,9 @@ def main():
         print(
             (
                 "Publishing {} in {}: robot yaw rate = -raw sensor Z. "
-                "QoS=best_effort depth={}. No TF/odom."
+                "QoS=best_effort depth={}. {}. No TF/odom."
             ).format(
-                args.topic, args.frame, IMU_QOS_DEPTH
+                args.topic, args.frame, IMU_QOS_DEPTH, bias_text()
             ),
             flush=True,
         )
@@ -144,7 +160,11 @@ def main():
             msg.header.stamp.nanosec = nanosec
             msg.header.frame_id = args.frame
             msg.orientation_covariance[0] = -1.0
-            msg.angular_velocity.z = robot_yaw_rate_rad_s(raw_z_deg_s)
+            rate_z_deg_s = (
+                bias_hold.update(device_ms / 1000.0, raw_z_deg_s)
+                if bias_hold is not None else raw_z_deg_s
+            )
+            msg.angular_velocity.z = robot_yaw_rate_rad_s(rate_z_deg_s)
             msg.angular_velocity_covariance = [
                 UNUSED_AXIS_VARIANCE, 0.0, 0.0,
                 0.0, UNUSED_AXIS_VARIANCE, 0.0,
@@ -160,10 +180,10 @@ def main():
                 print(
                     (
                         "Published {} samples; {} queue drops; {} invalid; "
-                        "source_gaps_gt_100ms={}; max_device_gap_ms={:.3f}"
+                        "source_gaps_gt_100ms={}; max_device_gap_ms={:.3f}; {}"
                     ).format(
                         published, state["drops"], state["invalid"],
-                        source_gaps_over_limit, max_device_gap_ms
+                        source_gaps_over_limit, max_device_gap_ms, bias_text()
                     ),
                     flush=True,
                 )
@@ -182,11 +202,11 @@ def main():
         print(
             (
                 "Stopped after {} published samples; {} queue drops; {} invalid; "
-                "source_gaps_gt_100ms={}; max_device_gap_ms={:.3f}. "
+                "source_gaps_gt_100ms={}; max_device_gap_ms={:.3f}; {}. "
                 "No TF/odom published."
             ).format(
                 published, state["drops"], state["invalid"],
-                source_gaps_over_limit, max_device_gap_ms
+                source_gaps_over_limit, max_device_gap_ms, bias_text()
             ),
             flush=True,
         )

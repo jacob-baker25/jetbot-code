@@ -136,7 +136,7 @@ class ImuYawOdometryTest(unittest.TestCase):
 
     def test_session_has_explicit_baseline_and_imu_modes(self):
         text = SESSION.read_text(encoding="utf-8")
-        self.assertIn('["rf2o", "imu_yaw"]', text)
+        self.assertIn('["rf2o", "imu_yaw", "imu_yaw_hold"]', text)
         self.assertIn("odom_topic:=/odom_rf2o_raw", text)
         self.assertIn("publish_tf:=false", text)
         self.assertIn("imu_yaw_odometry.py", text)
