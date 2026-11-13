@@ -1,5 +1,9 @@
 # Recorder repair and measured turn test
 
+Update 2026-11-13: the first stationary attempt failed before recorder
+qualification. Follow [IMU publisher timing repair](IMU_PUBLISHER_TIMING_REPAIR.md)
+for the next stationary run; defer the motion sequence below until it passes.
+
 2026-11-12. Goal: trustworthy hallway mapping/localization, with evidence that
 IMU assistance improves motion estimates. This change repairs measurement;
 it is not a claim that hallway mapping is solved.

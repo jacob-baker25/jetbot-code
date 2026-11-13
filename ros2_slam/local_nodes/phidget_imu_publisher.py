@@ -8,11 +8,13 @@ base_link yaw rate = -raw sensor Z rate.
 """
 
 import argparse
+from collections import deque
+import json
 import math
 import queue
 import time
 
-from imu_planar import anchored_stamp_ns, robot_yaw_rate_rad_s, split_stamp_ns
+from imu_planar import DeviceTimeMapper, robot_yaw_rate_rad_s, split_stamp_ns
 
 
 GYRO_Z_VARIANCE = 1.0e-5
@@ -45,19 +47,41 @@ def main():
 
     spatial = Spatial()
     events = queue.Queue(maxsize=1000)
-    state = {"drops": 0, "invalid": 0, "error": None}
+    state = {"drops": 0, "invalid": 0, "error": None, "last_callback_mono": None}
     node = None
     published = 0
     last_device_ms = None
     max_device_gap_ms = 0.0
     source_gaps_over_limit = 0
+    clock_mapper = DeviceTimeMapper()
+    timing_max = {}
+    timing_events = deque(maxlen=128)
+    timing_event_count = 0
+
+    def observe_timing(kind, seconds, device_ms=None):
+        nonlocal timing_event_count
+        timing_max[kind] = max(timing_max.get(kind, 0.0), seconds)
+        if seconds > .1:
+            timing_event_count += 1
+            timing_events.append({"kind": kind, "seconds": seconds,
+                                  "mono_s": time.monotonic(),
+                                  "device_ms": device_ms})
 
     def on_data(device, acceleration, angular_rate, magnetic_field, timestamp):
+        before_clock = time.monotonic()
+        receipt_ros_ns = node.get_clock().now().nanoseconds
+        after_clock = time.monotonic()
+        clock_uncertainty_s = (after_clock - before_clock) / 2.0
+        receipt_mono = (after_clock + before_clock) / 2.0
+        previous = state["last_callback_mono"]
+        callback_gap = 0.0 if previous is None else receipt_mono - previous
+        state["last_callback_mono"] = receipt_mono
         if not math.isfinite(timestamp) or not math.isfinite(angular_rate[2]):
             state["invalid"] += 1
             return
         try:
-            events.put_nowait((float(timestamp), float(angular_rate[2])))
+            events.put_nowait((float(timestamp), float(angular_rate[2]),
+                              receipt_mono, receipt_ros_ns, callback_gap, clock_uncertainty_s))
         except queue.Full:
             state["drops"] += 1
 
@@ -85,58 +109,47 @@ def main():
         imu_qos.reliability = QoSReliabilityPolicy.BEST_EFFORT
         imu_qos.durability = QoSDurabilityPolicy.VOLATILE
         publisher = node.create_publisher(Imu, args.topic, imu_qos)
-        spatial.setOnSpatialDataHandler(on_data)
         print(
             (
                 "Publishing {} in {}: robot yaw rate = -raw sensor Z. "
-                "QoS=best_effort depth={}. No TF/odom."
+                "QoS=best_effort depth={}. Fixed device clock anchor; quiet publication loop. No TF/odom."
             ).format(
                 args.topic, args.frame, IMU_QOS_DEPTH
             ),
             flush=True,
         )
+        # Do not activate delivery until startup output has completed.
+        spatial.setOnSpatialDataHandler(on_data)
 
         start = time.monotonic()
-        next_report = start + 5.0
-        anchor_device_ms = None
-        anchor_ros_ns = None
+        previous_loop = start
         last_sample = time.monotonic()
         while rclpy.ok() and (args.seconds == 0.0 or
                               time.monotonic() - start < args.seconds):
+            now_mono = time.monotonic()
+            observe_timing("loop_gap_s", now_mono - previous_loop)
+            previous_loop = now_mono
             if state["error"]:
                 raise RuntimeError("Phidget error: " + state["error"])
             try:
-                device_ms, raw_z_deg_s = events.get(timeout=0.2)
+                device_ms, raw_z_deg_s, receipt_mono, receipt_ros_ns, callback_gap, clock_uncertainty_s = events.get(timeout=0.2)
             except queue.Empty:
                 if time.monotonic() - last_sample > 3.0:
                     raise RuntimeError("No valid Spatial sample for three seconds")
                 continue
             last_sample = time.monotonic()
+            observe_timing("callback_gap_s", callback_gap, device_ms)
+            observe_timing("clock_read_s", 2 * clock_uncertainty_s, device_ms)
+            observe_timing("queue_wait_s", last_sample - receipt_mono, device_ms)
             if last_device_ms is not None:
                 device_gap_ms = device_ms - last_device_ms
                 max_device_gap_ms = max(max_device_gap_ms, device_gap_ms)
                 if device_gap_ms > SOURCE_GAP_REPORT_MS:
                     source_gaps_over_limit += 1
-                    print(
-                        "IMU_SOURCE_GAP device_gap_ms={:.3f}".format(
-                            device_gap_ms
-                        ),
-                        flush=True,
-                    )
+                    observe_timing("device_gap_s", device_gap_ms / 1000.0, device_ms)
             last_device_ms = device_ms
-            now_ns = node.get_clock().now().nanoseconds
-            if anchor_device_ms is None:
-                anchor_device_ms = device_ms
-                anchor_ros_ns = now_ns
-            stamp_ns = anchored_stamp_ns(
-                device_ms, anchor_device_ms, anchor_ros_ns
-            )
-            # A large divergence means the anchor no longer represents the
-            # current ROS clock (clock adjustment or prolonged queue backlog).
-            if abs(now_ns - stamp_ns) > 1000000000:
-                anchor_device_ms = device_ms
-                anchor_ros_ns = now_ns
-                stamp_ns = now_ns
+            stamp_ns = clock_mapper.stamp(device_ms, receipt_ros_ns, receipt_mono, clock_uncertainty_s)
+            observe_timing("sample_age_s", (node.get_clock().now().nanoseconds - stamp_ns) / 1e9, device_ms)
 
             msg = Imu()
             sec, nanosec = split_stamp_ns(stamp_ns)
@@ -151,23 +164,13 @@ def main():
                 0.0, 0.0, GYRO_Z_VARIANCE,
             ]
             msg.linear_acceleration_covariance[0] = -1.0
+            before_publish = time.monotonic()
             publisher.publish(msg)
+            observe_timing("publish_call_s", time.monotonic() - before_publish, device_ms)
             published += 1
+            before_spin = time.monotonic()
             rclpy.spin_once(node, timeout_sec=0.0)
-
-            now = time.monotonic()
-            if now >= next_report:
-                print(
-                    (
-                        "Published {} samples; {} queue drops; {} invalid; "
-                        "source_gaps_gt_100ms={}; max_device_gap_ms={:.3f}"
-                    ).format(
-                        published, state["drops"], state["invalid"],
-                        source_gaps_over_limit, max_device_gap_ms
-                    ),
-                    flush=True,
-                )
-                next_report = now + 5.0
+            observe_timing("spin_call_s", time.monotonic() - before_spin, device_ms)
     except KeyboardInterrupt:
         pass
     finally:
@@ -190,6 +193,11 @@ def main():
             ),
             flush=True,
         )
+        print("IMU_TIMING_SUMMARY " + json.dumps({
+            "max_seconds": timing_max, "event_count": timing_event_count,
+            "retained_event_count": len(timing_events),
+            "events": list(timing_events),
+        }, allow_nan=False), flush=True)
 
 
 if __name__ == "__main__":

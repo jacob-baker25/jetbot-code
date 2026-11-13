@@ -152,7 +152,7 @@ class ImuYawOdometryTest(unittest.TestCase):
             self.assertIn("IMU_QOS_DEPTH = 100", text)
             self.assertIn("QoSReliabilityPolicy.BEST_EFFORT", text)
             self.assertIn("QoSDurabilityPolicy.VOLATILE", text)
-        self.assertIn("IMU_SOURCE_GAP", publisher_text)
+        self.assertIn("IMU_TIMING_SUMMARY", publisher_text)
         self.assertIn("max_device_gap_ms", publisher_text)
 
     def test_session_verifies_live_odom_messages_not_buffered_log_text(self):

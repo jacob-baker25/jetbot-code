@@ -66,6 +66,8 @@ def main():
     state = {
         "fatal": None,
         "last_imu_receipt": None,
+        "last_imu_stamp": None,
+        "imu_processed": 0,
         "last_raw_odom_receipt": None,
         "last_fused_receipt": None,
         "raw_received": 0,
@@ -145,6 +147,8 @@ def main():
         try:
             integrator.add(message_stamp_s(message), message.angular_velocity.z)
             state["last_imu_receipt"] = time.monotonic()
+            state["last_imu_stamp"] = message_stamp_s(message)
+            state["imu_processed"] += 1
             process_pending()
         except (ImuTimingError, ValueError) as exc:
             state["fatal"] = str(exc)
@@ -221,7 +225,13 @@ def main():
                 break
             if (state["last_imu_receipt"] is not None and
                     time.monotonic() - state["last_imu_receipt"] > MAX_IMU_STALE_S):
-                node.get_logger().error("IMU_YAW_ODOM_FATAL IMU stream became stale")
+                node.get_logger().error(
+                    ("IMU_YAW_ODOM_FATAL IMU stream became stale "
+                     "mono={:.6f} ros={:.6f} receipt_age={:.6f} "
+                     "imu_processed={} last_imu_stamp={} raw_received={}").format(
+                        time.monotonic(), node.get_clock().now().nanoseconds / 1e9,
+                        time.monotonic() - state["last_imu_receipt"],
+                        state["imu_processed"], state["last_imu_stamp"], state["raw_received"]))
                 exit_code = 1
                 break
             try:

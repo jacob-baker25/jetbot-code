@@ -232,6 +232,7 @@ class MappingSession(Node):
         odom_source_names = (
             (
                 "phidget_imu_publisher.py",
+                "imu_planar.py",
                 "imu_yaw_odometry.py",
                 "imu_yaw_odometry_core.py",
             )
