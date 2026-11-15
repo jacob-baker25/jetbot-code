@@ -135,7 +135,7 @@ class SessionTimingTest(unittest.TestCase):
                 orientation=types.SimpleNamespace(x=0., y=0., z=0., w=1.))
             msg = types.SimpleNamespace(header=types.SimpleNamespace(stamp=types.SimpleNamespace(
                 sec=9, nanosec=calls[0] * 20000000)), angular_velocity=types.SimpleNamespace(z=.2),
-                pose=types.SimpleNamespace(pose=pose))
+                pose=types.SimpleNamespace(pose=pose), ranges=[1.0] * 360)
             for callback in callbacks.values(): callback(msg)
         modules = {
             "rclpy": types.SimpleNamespace(init=lambda: None, ok=lambda: calls[0] < 5,
@@ -144,7 +144,7 @@ class SessionTimingTest(unittest.TestCase):
             "rclpy.qos": types.SimpleNamespace(QoSProfile=lambda depth: types.SimpleNamespace(),
                 QoSReliabilityPolicy=types.SimpleNamespace(BEST_EFFORT=1),
                 QoSDurabilityPolicy=types.SimpleNamespace(VOLATILE=1)),
-            "sensor_msgs.msg": types.SimpleNamespace(Imu=object),
+            "sensor_msgs.msg": types.SimpleNamespace(Imu=object, LaserScan=object),
             "nav_msgs.msg": types.SimpleNamespace(Odometry=object),
         }
         original_open = open
@@ -157,7 +157,7 @@ class SessionTimingTest(unittest.TestCase):
         observer.open = lambda *a, **kw: Writer(original_open(*a, **kw))
         with tempfile.TemporaryDirectory() as folder:
             target = str(Path(folder) / "capture.jsonl")
-            args = ["observer", target, "--quiet-memory", "--include-odom", "--seconds", "1"]
+            args = ["observer", target, "--quiet-memory", "--include-odom", "--include-scan", "--seconds", "1"]
             with mock.patch.dict(sys.modules, modules), mock.patch.object(sys, "argv", args):
                 with contextlib.redirect_stdout(io.StringIO()) as output:
                     observer.main()
@@ -166,6 +166,11 @@ class SessionTimingTest(unittest.TestCase):
             import json
             records = [json.loads(line) for line in Path(target).read_text().splitlines()]
         self.assertEqual(writes, [5])
+        scans = [r for r in records if r["kind"] == "scan"]
+        self.assertEqual(len(scans), 5)
+        self.assertEqual(scans[-1]["bins"], 360)
+        self.assertAlmostEqual(scans[-1]["stamp_gap_s"], .02)
+        self.assertNotIn("ranges", scans[-1])
         self.assertEqual(len([r for r in records if r["kind"] == "odom"]), 10)
         self.assertEqual(next(r for r in records if r["kind"] == "imu")["yaw_rate_rad_s"], .2)
         self.assertEqual(next(r for r in records if r["kind"] == "odom")["x_m"], 1.)

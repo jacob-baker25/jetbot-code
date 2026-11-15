@@ -35,6 +35,7 @@ from tf2_ros import (
 from jetbot import Robot
 from ament_index_python.packages import get_package_share_directory
 from matcher_profiles import PROFILE_FILES, expected_parameters, check_karto_config
+from motion_freshness import require_fresh_motion, MAX_MOTION_AGE_S
 
 
 # ============================================================
@@ -270,6 +271,9 @@ class MappingSession(Node):
         self.last_motor_command = 0.0
 
         self.last_odom = None
+        self.last_motion_scan = None
+        self.motion_guard_enabled = True
+        self.stationary_only = os.environ.get("JETBOT_STATIONARY_ONLY") == "1"
         self.last_raw_odom = None
         self.checkpoint_failures = []
         self.odom_message_count = 0
@@ -380,6 +384,8 @@ class MappingSession(Node):
             self.delayed_scan_callback,
             qos_profile_sensor_data
         )
+        self.create_subscription(LaserScan, "/scan", self.motion_scan_callback,
+                                 qos_profile_sensor_data)
 
         self.create_timer(
             0.1,
@@ -405,6 +411,7 @@ class MappingSession(Node):
         )
 
         self.last_odom = {
+            "receipt_mono": time.monotonic(),
             "stamp_s": float(
                 msg.header.stamp.sec
                 +
@@ -423,6 +430,19 @@ class MappingSession(Node):
             )
         }
 
+
+    def motion_scan_callback(self, msg):
+        self.last_motion_scan = {
+            "stamp_s": msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9,
+            "receipt_mono": time.monotonic(),
+        }
+
+    def require_motion_data(self):
+        if self.stationary_only:
+            raise RuntimeError("Stationary trial: motor commands are disabled")
+        require_fresh_motion(self.last_odom, self.last_motion_scan,
+                             self.get_clock().now().nanoseconds / 1e9,
+                             time.monotonic())
 
     def map_callback(self, msg):
 
@@ -1763,6 +1783,9 @@ class MappingSession(Node):
         right
     ):
 
+        if (left or right) and getattr(self, "motion_guard_enabled", False):
+            self.require_motion_data()
+
         left_command = clamp(
             left
             *
@@ -2382,6 +2405,8 @@ class MappingSession(Node):
                 "session_telemetry_version": 2,
                 "legacy_rf2o_field_source": "IMU-assisted odometry" if self.odom_mode == "imu_yaw" else "raw RF2O",
                 "checkpoint_max_age_s": CHECKPOINT_MAX_AGE_SECONDS,
+                "motion_max_age_s": MAX_MOTION_AGE_S,
+                "stationary_only": self.stationary_only,
                 "matcher_profile": self.matcher_profile,
                 "odom_mode": self.odom_mode,
                 "imu_yaw_configuration": (
@@ -2768,6 +2793,9 @@ class MappingSession(Node):
                     self,
                     timeout_sec=0.01
                 )
+
+                if self.moving and getattr(self, "motion_guard_enabled", False):
+                    self.require_motion_data()
 
                 readable, _, _ = (
                     select.select(
@@ -3254,6 +3282,10 @@ def main():
         node.stop_robot()
         node.stop_stack()
 
+        node.run_status = "interrupted"
+        node.session_end_unix = time.time()
+        node.write_results()
+
     except Exception as exc:
 
         print()
@@ -3266,6 +3298,9 @@ def main():
         node.stop_robot()
         node.stop_stack()
 
+        node.run_status = "failed_exception"
+        node.session_end_unix = time.time()
+        node.write_results()
         raise
 
     finally:

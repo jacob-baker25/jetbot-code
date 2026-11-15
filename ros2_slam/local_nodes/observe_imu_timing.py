@@ -18,6 +18,8 @@ def main():
                         help="Keep bounded records in RAM; write only after capture; no live reports")
     parser.add_argument("--include-odom", action="store_true",
                         help="Also passively timestamp raw and fused odometry arrivals")
+    parser.add_argument("--include-scan", action="store_true",
+                        help="Record /scan timing only, not range arrays")
     args = parser.parse_args()
     if not math.isfinite(args.seconds) or not 0 < args.seconds <= 600:
         parser.error("--seconds must be in (0, 600]")
@@ -103,11 +105,26 @@ def main():
         for topic in ("/odom_rf2o_raw", "/odom_rf2o"):
             odom_subscriptions.append(node.create_subscription(
                 Odometry, topic, lambda msg, topic=topic: receive_odom(topic, msg), qos))
+    scan_previous = [None, None]
+    if args.include_scan:
+        from sensor_msgs.msg import LaserScan
+
+        def receive_scan(msg):
+            now = time.monotonic()
+            stamp = msg.header.stamp.sec * 1000000000 + msg.header.stamp.nanosec
+            record("scan", topic="/scan", stamp_ns=stamp,
+                   receipt_gap_s=None if scan_previous[0] is None else now - scan_previous[0],
+                   stamp_gap_s=None if scan_previous[1] is None else (stamp - scan_previous[1]) / 1e9,
+                   ros_age_s=(node.get_clock().now().nanoseconds - stamp) / 1e9,
+                   bins=len(msg.ranges))
+            scan_previous[:] = [now, stamp]
+
+        scan_subscription = node.create_subscription(LaserScan, "/scan", receive_scan, qos)
     start = time.monotonic()
     next_report = start
     record("start", topic="/imu/data_raw", qos="best_effort_depth_100",
-           seconds=args.seconds, observer_version=3, quiet_memory=args.quiet_memory,
-           include_odom=args.include_odom)
+           seconds=args.seconds, observer_version=4, quiet_memory=args.quiet_memory,
+           include_odom=args.include_odom, include_scan=args.include_scan)
     print("Passive observer ready. No TF or robot commands. Start mapping now.", flush=True)
     if args.quiet_memory:
         print("Quiet capture: no further output until capture ends; data saved on normal exit/Ctrl+C.", flush=True)
