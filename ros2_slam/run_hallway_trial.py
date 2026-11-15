@@ -145,7 +145,10 @@ def main():
             sys.executable, str(root / "sources" / "observe_imu_timing.py"),
             str(root / "observer.jsonl"), "--seconds", "600", "--quiet-memory",
             "--include-odom", "--include-scan"], stdout=observer_log,
-            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            # MappingSession stops children with killpg. The observer must not
+            # share the launcher's foreground group, or shutdown interrupts us.
+            start_new_session=True)
         deadline = time.monotonic() + 20
         while "Passive observer ready" not in (root / "observer.log").read_text():
             if observer.poll() is not None or time.monotonic() > deadline:

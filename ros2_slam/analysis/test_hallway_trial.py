@@ -100,6 +100,12 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertTrue(root.exists())
 
     def test_full_runner_archives_on_session_failure_and_stops_observer(self):
+        self.exercise_runner(failed=True)
+
+    def test_full_runner_preserves_normal_completion(self):
+        self.exercise_runner(failed=False)
+
+    def exercise_runner(self, failed):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory); ram = base / "ram"; ram.mkdir()
             observer = types.SimpleNamespace(returncode=None)
@@ -108,6 +114,7 @@ class HallwayTrialTest(unittest.TestCase):
             observer.send_signal = send
             observer.wait = lambda timeout: observer.returncode
             def spawn(command, **kwargs):
+                self.assertTrue(kwargs['start_new_session'])
                 kwargs['stdout'].write('Passive observer ready\n'); kwargs['stdout'].flush()
                 Path(command[2]).write_text('{"kind":"stop"}\n')
                 return observer
@@ -118,7 +125,9 @@ class HallwayTrialTest(unittest.TestCase):
                 node = fake.MappingSession()
                 self.assertEqual(node.processes, [("observer", observer)])
                 self.assertEqual(fake.LOCAL_NODES, str(ram / "sources"))
-                raise RuntimeError('simulated process failure')
+                if failed:
+                    raise RuntimeError('simulated process failure')
+                raise SystemExit(0)
             fake.main = fail
             import os
             old_path = list(sys.path)
@@ -132,15 +141,16 @@ class HallwayTrialTest(unittest.TestCase):
                      mock.patch.dict(sys.modules, {'mapping_session':fake}), \
                      mock.patch.dict(os.environ, {}, clear=False), \
                      mock.patch.object(sys, 'argv', ['trial', 'test_failure']):
-                    self.assertEqual(runner.main(), 1)
+                    self.assertEqual(runner.main(), 1 if failed else 0)
             finally:
                 sys.path[:] = old_path
             self.assertEqual(observer.returncode, 0)
             target = base / 'autochair_ros2_ws/experiments/test_failure_bundle.tar.gz'
             self.assertTrue(target.exists())
             manifest = json.loads((ram / 'trial_manifest.json').read_text())
-            self.assertEqual(manifest['status'], 'failed')
-            self.assertIn('simulated process failure', manifest['error'])
+            self.assertEqual(manifest['status'], 'failed' if failed else 'complete')
+            if failed:
+                self.assertIn('simulated process failure', manifest['error'])
 
     def test_python36_syntax(self):
         for path in [ROOT / 'run_hallway_trial.py', ROOT / 'local_nodes/motion_freshness.py',
