@@ -60,6 +60,7 @@ class LidarGeometryTest(unittest.TestCase):
             )
             for name in (
                 "lidar_scan_geometry.py",
+                "lidar_serial_reader.py",
                 "rplidar_python_bridge.py",
                 "mapping_session.py",
             ):

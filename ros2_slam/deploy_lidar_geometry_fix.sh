@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${AUTOCHAIR_WS:-${HOME}/autochair_ros2_ws}"
 TARGET="${WORKSPACE}/local_nodes"
-FILES=(lidar_scan_geometry.py rplidar_python_bridge.py mapping_session.py)
+FILES=(lidar_scan_geometry.py lidar_serial_reader.py rplidar_python_bridge.py mapping_session.py)
 
 [[ -d "${TARGET}" ]] || { echo "Missing ${TARGET}" >&2; exit 1; }
 for name in "${FILES[@]}"; do
@@ -28,5 +28,5 @@ done
 echo
 echo "Backup: ${BACKUP}"
 echo "Deployment complete. No colcon build is needed."
-echo "This changes lidar angle handedness only."
+echo "Includes lidar handedness repair and bounded serial reader with timing diagnostics."
 echo "Legacy Karto-compatible LaserScan count metadata is retained."

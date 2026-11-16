@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 
 import time
+import json
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 
-from rplidar import RPLidar, RPLidarException
+from rplidar import RPLidarException
+from lidar_serial_reader import BoundedRPLidar
 
 from lidar_scan_geometry import (
     NUM_BINS,
@@ -33,7 +36,7 @@ class RPLidarBridge(Node):
             10
         )
 
-        self.lidar = RPLidar(
+        self.lidar = BoundedRPLidar(
             PORT,
             baudrate=BAUDRATE,
             timeout=2
@@ -55,6 +58,11 @@ class RPLidarBridge(Node):
         )
 
         self.last_scan_time = time.time()
+        self._shutdown_done = False
+        self.scan_delivery_max_s = 0.0
+        self.publish_max_s = 0.0
+        self.scan_count = 0
+        self.slow_events = deque(maxlen=32)
 
     def recover_lidar_state(self):
         self.get_logger().info('Resetting RPLidar to a clean state')
@@ -132,26 +140,47 @@ class RPLidarBridge(Node):
 
             self.lidar.clean_input()
 
+            self.lidar.capture_active = True
+            previous_scan = None
             for scan in self.lidar.iter_scans():
                 if not rclpy.ok():
                     break
-
+                received = time.monotonic()
+                if previous_scan is not None:
+                    gap = received - previous_scan
+                    self.scan_delivery_max_s = max(self.scan_delivery_max_s, gap)
+                    if gap > .35:
+                        self.slow_events.append({"kind": "scan_delivery_gap", "seconds": gap,
+                                                 "end_mono_s": received, "end_unix_s": time.time()})
+                previous_scan = received
                 self.publish_scan(scan)
+                publish_s = time.monotonic() - received
+                self.publish_max_s = max(self.publish_max_s, publish_s)
+                self.scan_count += 1
+                if publish_s > .1:
+                    self.slow_events.append({"kind": "conversion_and_publish", "seconds": publish_s,
+                                             "end_mono_s": time.monotonic(), "end_unix_s": time.time()})
 
         except RPLidarException as exc:
             self.get_logger().error(
                 'RPLidar error: {}'.format(exc)
             )
+            raise
 
         except Exception as exc:
             self.get_logger().error(
                 'Unexpected error: {}'.format(exc)
             )
+            raise
 
         finally:
             self.shutdown_lidar()
 
     def shutdown_lidar(self):
+        if self._shutdown_done:
+            return
+        self._shutdown_done = True
+        self.lidar.capture_active = False
         self.get_logger().info('Stopping RPLidar')
 
         try:
@@ -174,11 +203,17 @@ class RPLidarBridge(Node):
         except Exception:
             pass
 
+        summary = self.lidar.timing_summary()
+        summary.update(scan_count=self.scan_count, scan_delivery_max_s=self.scan_delivery_max_s,
+                       conversion_publish_max_s=self.publish_max_s, slow_events=list(self.slow_events))
+        print('LIDAR_TIMING_SUMMARY ' + json.dumps(summary, allow_nan=False), flush=True)
+
 
 def main(args=None):
     rclpy.init(args=args)
 
     node = None
+    exit_code = 0
 
     try:
         node = RPLidarBridge()
@@ -189,6 +224,7 @@ def main(args=None):
 
     except Exception as exc:
         print('Fatal error: {}'.format(exc))
+        exit_code = 1
 
     finally:
         if node is not None:
@@ -201,7 +237,8 @@ def main(args=None):
 
         if rclpy.ok():
             rclpy.shutdown()
+    return exit_code
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())
