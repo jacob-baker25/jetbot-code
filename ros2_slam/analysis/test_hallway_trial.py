@@ -33,6 +33,19 @@ def session_method(name, namespace):
 
 
 class HallwayTrialTest(unittest.TestCase):
+    def test_logging_control_preserves_parameters_and_info_baseline(self):
+        import shlex
+        for command in ('ros2 run rf2o_laser_odometry rf2o_laser_odometry_node',
+                        'ros2 run rf2o_laser_odometry rf2o_laser_odometry_node '
+                        '--ros-args -p odom_topic:=/odom_rf2o_raw -p publish_tf:=false'):
+            self.assertEqual(runner.rf2o_logging_command(command, 'info'), command)
+            args = shlex.split(runner.rf2o_logging_command(command, 'warn'))
+            self.assertEqual(args.count('--ros-args'), 1)
+            self.assertEqual(args[-2:], ['--log-level', 'CLaserOdometry2D:=warn'])
+            self.assertEqual(args[:len(shlex.split(command))], shlex.split(command))
+        with self.assertRaises(ValueError):
+            runner.rf2o_logging_command('ros2 run example node', 'invalid')
+
     def test_motion_rejects_old_future_missing_and_nonfinite_data(self):
         fresh = {"stamp_s": 9.9, "receipt_mono": 19.9}
         guard.require_fresh_motion(fresh, fresh, 10., 20.)
@@ -120,11 +133,16 @@ class HallwayTrialTest(unittest.TestCase):
                 return observer
             class Session:
                 def __init__(self, *args): self.processes=[]; self.process_log_paths={}
+                def start_process(self, name, command):
+                    return name, command
             fake = types.SimpleNamespace(MappingSession=Session)
             def fail():
                 node = fake.MappingSession()
                 self.assertEqual(node.processes, [("observer", observer)])
                 self.assertEqual(fake.LOCAL_NODES, str(ram / "sources"))
+                self.assertEqual(node.start_process('lidar', 'unchanged'), ('lidar', 'unchanged'))
+                self.assertEqual(node.start_process('rf2o', 'ros2 run example node'),
+                    ('rf2o', 'ros2 run example node --ros-args --log-level CLaserOdometry2D:=warn'))
                 if failed:
                     raise RuntimeError('simulated process failure')
                 raise SystemExit(0)
@@ -140,7 +158,7 @@ class HallwayTrialTest(unittest.TestCase):
                      mock.patch.object(runner, 'summarize', return_value={'passed':False}), \
                      mock.patch.dict(sys.modules, {'mapping_session':fake}), \
                      mock.patch.dict(os.environ, {}, clear=False), \
-                     mock.patch.object(sys, 'argv', ['trial', 'test_failure']):
+                     mock.patch.object(sys, 'argv', ['trial', 'test_failure', '--rf2o-log-level', 'warn']):
                     self.assertEqual(runner.main(), 1 if failed else 0)
             finally:
                 sys.path[:] = old_path
@@ -149,6 +167,8 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertTrue(target.exists())
             manifest = json.loads((ram / 'trial_manifest.json').read_text())
             self.assertEqual(manifest['status'], 'failed' if failed else 'complete')
+            self.assertEqual(manifest['rf2o_log_level'], 'warn')
+            self.assertIn('CLaserOdometry2D:=warn', manifest['rf2o_command'])
             if failed:
                 self.assertIn('simulated process failure', manifest['error'])
 

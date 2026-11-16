@@ -126,11 +126,25 @@ def parse_rf2o_timing(log):
             'complete': len(markers) == 1 and len(summaries) == 1 and not errors}
 
 
+def rf2o_logging_command(command, level):
+    if level not in ('info', 'warn'):
+        raise ValueError('RF2O logging comparison supports info or warn')
+    # Scope the override to the calculation logger; preserve node warnings and
+    # the independent C++ timing marker/summary. INFO keeps the prior command.
+    if level == 'info':
+        return command
+    if '--ros-args' not in command.split():
+        command += ' --ros-args'
+    return command + ' --log-level CLaserOdometry2D:=warn'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("name")
     parser.add_argument("--phase", choices=("stationary", "turns", "route"), default="stationary")
     parser.add_argument("--odom", choices=("imu_yaw", "rf2o"), default="imu_yaw")
+    parser.add_argument("--rf2o-log-level", choices=("info", "warn"), default="info",
+                        help="Calculation logger only; warn suppresses routine per-scan INFO")
     args = parser.parse_args()
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,70}$", args.name):
         parser.error("Use a short name containing letters, digits, underscores or hyphens")
@@ -146,6 +160,7 @@ def main():
     root = Path(tempfile.mkdtemp(prefix=args.name + "_", dir="/dev/shm"))
     hashes = snapshot_sources(package / "local_nodes", root / "sources")
     manifest = {"name": args.name, "phase": args.phase, "odom": args.odom,
+                "rf2o_log_level": args.rf2o_log_level,
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
                 "installed_local_nodes_modified": False, "status": "starting"}
@@ -180,6 +195,13 @@ def main():
         base = session.MappingSession
 
         class TrialSession(base):
+            def start_process(self, name, command):
+                if name == 'rf2o':
+                    command = rf2o_logging_command(command, args.rf2o_log_level)
+                    manifest['rf2o_command'] = command
+                    write_json(root / 'trial_manifest.json', manifest)
+                return super(TrialSession, self).start_process(name, command)
+
             def __init__(self, *values):
                 super(TrialSession, self).__init__(*values)
                 # Observer termination (including its 10-minute cap) aborts the trial.
