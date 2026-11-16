@@ -1,4 +1,5 @@
 #include "rf2o_laser_odometry/CLaserOdometry2D.hpp"
+#include "rf2o_laser_odometry/TimingDiagnostics.hpp"
 
 #include <tf2/convert.h>
 #include <tf2/exceptions.h>
@@ -14,6 +15,7 @@ namespace rf2o {
 class CLaserOdometry2DNode : public rclcpp::Node
 {
 public:
+  TimingDiagnostics timing;
   CLaserOdometry2DNode();
   void process();
   void publish();

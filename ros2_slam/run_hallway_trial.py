@@ -69,6 +69,10 @@ def summarize(root, analysis_path):
     with (results[0].parent / "trajectory.csv").open(newline="") as stream:
         trajectory = list(csv.DictReader(stream))
     report = module.evaluate(result, trajectory, records)
+    # This describes the C++ binary that actually ran, not the Python snapshot.
+    rf2o_log = results[0].parent / 'rf2o.log'
+    if rf2o_log.exists():
+        report['rf2o_diagnostics'] = parse_rf2o_timing(rf2o_log.read_text(errors='replace'))
     report["checkpoint_heading_changes"] = module.checkpoint_deltas(result)
     report["streams"] = {}
     checkpoints = result.get("checkpoints", [])
@@ -106,6 +110,20 @@ def summarize(root, analysis_path):
         for topic in required)
     report["interpretation"] = "Timing PASS is not motion/map qualification; inspect worst gaps and physical measurements."
     return report
+
+
+def parse_rf2o_timing(log):
+    markers = [line for line in log.splitlines() if 'RF2O_TIMING_ENABLED version=1' in line]
+    summaries = []
+    errors = []
+    for line in log.splitlines():
+        if 'RF2O_TIMING_SUMMARY ' in line:
+            try:
+                summaries.append(json.loads(line.split('RF2O_TIMING_SUMMARY ', 1)[1]))
+            except ValueError as exc:
+                errors.append(str(exc))
+    return {'enabled_markers': markers, 'summaries': summaries, 'parse_errors': errors,
+            'complete': len(markers) == 1 and len(summaries) == 1 and not errors}
 
 
 def main():

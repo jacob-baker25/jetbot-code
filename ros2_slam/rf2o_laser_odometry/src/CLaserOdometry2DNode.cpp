@@ -16,6 +16,8 @@
 ******************************************************************************************** */
 
 #include "rf2o_laser_odometry/CLaserOdometry2DNode.hpp"
+#include "rmw/rmw.h"
+#include <iostream>
 
 using namespace rf2o;
 
@@ -39,6 +41,12 @@ CLaserOdometry2DNode::CLaserOdometry2DNode(): Node("CLaserOdometry2DNode")
   this->get_parameter("init_pose_from_topic", init_pose_from_topic);
   this->declare_parameter<double>("freq", 10.0);
   this->get_parameter("freq", freq);
+  this->declare_parameter<bool>("timing_diagnostics", true);
+  this->get_parameter("timing_diagnostics", timing.enabled);
+  if (timing.enabled) {
+    std::cerr << "RF2O_TIMING_ENABLED version=1 rmw="
+              << rmw_get_implementation_identifier() << std::endl;
+  }
 
   // Init Publishers and Subscribers
   //---------------------------------
@@ -81,6 +89,11 @@ CLaserOdometry2DNode::CLaserOdometry2DNode(): Node("CLaserOdometry2DNode")
 */
 void CLaserOdometry2DNode::LaserCallBack(const sensor_msgs::msg::LaserScan::SharedPtr new_scan)
 {
+  TimingScope callback_timing(timing, TimingDiagnostics::CALLBACK);
+  if (timing.enabled) {
+    timing.scan(double(new_scan->header.stamp.sec)+double(new_scan->header.stamp.nanosec)*1e-9,
+                this->get_clock()->now().seconds(), TimingDiagnostics::now());
+  }
   if (GT_pose_initialized)
   {
     // Keep in memory the last received laser_scan
@@ -161,11 +174,15 @@ bool CLaserOdometry2DNode::scan_available()
 */
 void CLaserOdometry2DNode::process()
 {
+  TimingScope process_timing(timing, TimingDiagnostics::PROCESS);
   // Do only run when a new scan is ready 
   if( rf2o_ref.is_initialized() && scan_available() )
   {
     // Process odometry estimation
-    rf2o_ref.odometryCalculation(last_scan);
+    {
+      TimingScope compute_timing(timing, TimingDiagnostics::COMPUTE);
+      rf2o_ref.odometryCalculation(last_scan);
+    }
 
     // Publish odometry over ROS2 (tf/topic)
     publish();
@@ -224,7 +241,10 @@ void CLaserOdometry2DNode::publish()
   odom.twist.twist.linear.y = 0.0;
   odom.twist.twist.angular.z = rf2o_ref.ang_speed;   //angular speed
   //publish the message
-  odom_pub->publish(odom);
+  {
+    TimingScope publish_timing(timing, TimingDiagnostics::ODOM_PUBLISH);
+    odom_pub->publish(odom);
+  }
 
   // 2. publish over tf? (one one node should publish this transform!)
   if (publish_tf)
@@ -239,7 +259,10 @@ void CLaserOdometry2DNode::publish()
     odom_trans.transform.translation.z = 0.0;
     odom_trans.transform.rotation = quaternion;
     //send the transform
-    odom_broadcaster->sendTransform(odom_trans);
+    {
+      TimingScope tf_timing(timing, TimingDiagnostics::TF_PUBLISH);
+      odom_broadcaster->sendTransform(odom_trans);
+    }
   }
 }
 
@@ -257,12 +280,31 @@ int main(int argc, char** argv)
   // set desired loop rate
   rclcpp::Rate rate(myLaserOdomNode->freq);
 
-  // Loop
-  while (rclcpp::ok()){ 
-      rclcpp::spin_some(myLaserOdomNode);
+  // Keep the original rate, executor and processing order. Measure elapsed
+  // stages without periodic diagnostics I/O or new subscriptions.
+  auto &timing=myLaserOdomNode->timing;
+  double previous_loop=0;
+  try {
+    while (rclcpp::ok()) {
+      if (timing.enabled) {
+        const double now=TimingDiagnostics::now();
+        if (previous_loop!=0) timing.record(TimingDiagnostics::LOOP_GAP,now-previous_loop,now);
+        previous_loop=now;
+      }
+      {
+        TimingScope spin_timing(timing, TimingDiagnostics::SPIN);
+        rclcpp::spin_some(myLaserOdomNode);
+      }
       myLaserOdomNode->process();
-      rate.sleep();
+      {
+        TimingScope sleep_timing(timing, TimingDiagnostics::SLEEP);
+        rate.sleep();
+      }
+    }
+  } catch (...) {
+    if (timing.enabled) timing.write(std::cerr);
+    throw;
   }
-
+  if (timing.enabled) timing.write(std::cerr);
   return 0;
 }
