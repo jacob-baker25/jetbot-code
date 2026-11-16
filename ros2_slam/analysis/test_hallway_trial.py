@@ -41,10 +41,34 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertEqual(runner.rf2o_logging_command(command, 'info'), command)
             args = shlex.split(runner.rf2o_logging_command(command, 'warn'))
             self.assertEqual(args.count('--ros-args'), 1)
-            self.assertEqual(args[-2:], ['--log-level', 'CLaserOdometry2D:=warn'])
+            self.assertEqual(args[-2:], ['--log-level', 'warn'])
             self.assertEqual(args[:len(shlex.split(command))], shlex.split(command))
         with self.assertRaises(ValueError):
             runner.rf2o_logging_command('ros2 run example node', 'invalid')
+
+    def test_logging_parser_failure_prevents_starting_trial(self):
+        with mock.patch.object(runner.subprocess, 'check_call',
+                side_effect=runner.subprocess.CalledProcessError(1, 'rcl probe')), \
+             mock.patch.object(runner.subprocess, 'Popen') as spawn, \
+             mock.patch.object(runner.tempfile, 'mkdtemp') as make_trial, \
+             mock.patch.object(sys, 'argv', ['trial', 'test', '--rf2o-log-level', 'warn']):
+            with self.assertRaises(runner.subprocess.CalledProcessError):
+                runner.main()
+            spawn.assert_not_called()
+            make_trial.assert_not_called()
+
+    def test_logging_parser_probe_uses_shared_rcl_without_creating_node(self):
+        with mock.patch.object(runner.subprocess, 'check_call') as call:
+            runner.check_rcl_logging('info')
+            call.assert_not_called()
+            runner.check_rcl_logging('warn')
+            command = call.call_args[0][0]
+            contexts = []
+            fake = types.SimpleNamespace(init=lambda **kw:contexts.append(kw['args']),
+                shutdown=lambda:contexts.append('shutdown'))
+            with mock.patch.dict(sys.modules, {'rclpy':fake}):
+                exec(command[2], {})
+            self.assertEqual(contexts, [['rf2o_logging_check', '--ros-args', '--log-level', 'warn'], 'shutdown'])
 
     def test_motion_rejects_old_future_missing_and_nonfinite_data(self):
         fresh = {"stamp_s": 9.9, "receipt_mono": 19.9}
@@ -142,7 +166,7 @@ class HallwayTrialTest(unittest.TestCase):
                 self.assertEqual(fake.LOCAL_NODES, str(ram / "sources"))
                 self.assertEqual(node.start_process('lidar', 'unchanged'), ('lidar', 'unchanged'))
                 self.assertEqual(node.start_process('rf2o', 'ros2 run example node'),
-                    ('rf2o', 'ros2 run example node --ros-args --log-level CLaserOdometry2D:=warn'))
+                    ('rf2o', 'ros2 run example node --ros-args --log-level warn'))
                 if failed:
                     raise RuntimeError('simulated process failure')
                 raise SystemExit(0)
@@ -155,6 +179,7 @@ class HallwayTrialTest(unittest.TestCase):
                      mock.patch.object(runner.tempfile, 'mkdtemp', return_value=str(ram)), \
                      mock.patch.object(runner.subprocess, 'Popen', side_effect=spawn), \
                      mock.patch.object(runner.subprocess, 'check_output', return_value='testcommit\n'), \
+                     mock.patch.object(runner.subprocess, 'check_call'), \
                      mock.patch.object(runner, 'summarize', return_value={'passed':False}), \
                      mock.patch.dict(sys.modules, {'mapping_session':fake}), \
                      mock.patch.dict(os.environ, {}, clear=False), \
@@ -168,7 +193,8 @@ class HallwayTrialTest(unittest.TestCase):
             manifest = json.loads((ram / 'trial_manifest.json').read_text())
             self.assertEqual(manifest['status'], 'failed' if failed else 'complete')
             self.assertEqual(manifest['rf2o_log_level'], 'warn')
-            self.assertIn('CLaserOdometry2D:=warn', manifest['rf2o_command'])
+            self.assertTrue(manifest['rf2o_command'].endswith('--log-level warn'))
+            self.assertEqual(manifest['rf2o_log_scope'], 'process_default')
             if failed:
                 self.assertIn('simulated process failure', manifest['error'])
 

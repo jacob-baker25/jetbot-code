@@ -129,13 +129,25 @@ def parse_rf2o_timing(log):
 def rf2o_logging_command(command, level):
     if level not in ('info', 'warn'):
         raise ValueError('RF2O logging comparison supports info or warn')
-    # Scope the override to the calculation logger; preserve node warnings and
-    # the independent C++ timing marker/summary. INFO keeps the prior command.
+    # rcl 0.8.5 accepts a plain severity, not logger:=severity. This applies
+    # only to the RF2O process. WARN retains warnings and direct C++ timing.
+    # INFO keeps the prior command exactly.
     if level == 'info':
         return command
     if '--ros-args' not in command.split():
         command += ' --ros-args'
-    return command + ' --log-level CLaserOdometry2D:=warn'
+    return command + ' --log-level warn'
+
+
+def check_rcl_logging(level):
+    if level == 'info':
+        return
+    # Exercise the installed shared rcl argument parser before starting nodes.
+    # This is a compatibility check, not an RF2O runtime/accuracy test.
+    subprocess.check_call([sys.executable, '-c',
+        'import rclpy; rclpy.init(args=["rf2o_logging_check", "--ros-args", '
+        '"--log-level", "warn"]); rclpy.shutdown()'], timeout=20)
+    print('Installed rcl logging argument check: PASS', flush=True)
 
 
 def main():
@@ -144,10 +156,11 @@ def main():
     parser.add_argument("--phase", choices=("stationary", "turns", "route"), default="stationary")
     parser.add_argument("--odom", choices=("imu_yaw", "rf2o"), default="imu_yaw")
     parser.add_argument("--rf2o-log-level", choices=("info", "warn"), default="info",
-                        help="Calculation logger only; warn suppresses routine per-scan INFO")
+                        help="RF2O process only; warn suppresses routine per-scan INFO")
     args = parser.parse_args()
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,70}$", args.name):
         parser.error("Use a short name containing letters, digits, underscores or hyphens")
+    check_rcl_logging(args.rf2o_log_level)
     package = Path(__file__).resolve().parent
     output = Path.home() / "autochair_ros2_ws" / "experiments"
     output.mkdir(parents=True, exist_ok=True)
@@ -161,6 +174,7 @@ def main():
     hashes = snapshot_sources(package / "local_nodes", root / "sources")
     manifest = {"name": args.name, "phase": args.phase, "odom": args.odom,
                 "rf2o_log_level": args.rf2o_log_level,
+                "rf2o_log_scope": "process_default",
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
                 "installed_local_nodes_modified": False, "status": "starting"}

@@ -7,11 +7,19 @@ Logging is a suspect, not yet a confirmed cause. Nine eigensolver failures also
 caused nine old estimates to be republished; that independent defect remains.
 
 Use the current compiled binary. No deploy script or colcon build is needed.
-The runner's optional --rf2o-log-level warn suppresses routine INFO from only
-CLaserOdometry2D. Warnings/errors and the C++ timing summary remain enabled.
+The runner's optional --rf2o-log-level warn suppresses INFO within the RF2O
+process only. Warnings/errors and direct C++ timing output remain enabled.
 The default info preserves the previous launch command. The manifest saves the
-requested level and actual RF2O command. Standard Eloquent per-logger syntax:
-https://repo.test.ros2.org/en/eloquent/Tutorials/Logging-and-logger-configuration.html
+requested level, process scope and actual RF2O command.
+
+Compatibility correction: quiet trial 01 failed before initialization because
+rcl 0.8.5 rejects logger:=severity syntax. Zero odometry; no timing comparison
+was obtained. Use plain --log-level warn. Verified exact parser source:
+https://github.com/ros2/rcl/blob/0.8.5/rcl/src/rcl/arguments.c#L1752
+The runner now tests the installed shared rcl parser through rclpy.init/shutdown
+before creating trial nodes. No node or motor interface is created by this probe.
+If it fails, stop and send output; no full trial has started. Local mocked tests
+verify ordering/commands, not the Jetson library itself.
 
 On the Jetson, with no other mapping session running:
 
@@ -23,7 +31,7 @@ git pull --ff-only origin experiment/scan-gate-diagnostics
 source /opt/ros/eloquent/setup.bash
 source ~/autochair_ros2_ws/install/rf2o_laser_odometry/share/rf2o_laser_odometry/local_setup.bash
 source ~/autochair_ros2_ws/install/slam_toolbox/share/slam_toolbox/local_setup.bash
-python3 ros2_slam/run_hallway_trial.py rf2o_quiet_stationary_01 --phase stationary --odom rf2o --rf2o-log-level warn
+python3 ros2_slam/run_hallway_trial.py rf2o_quiet_stationary_02 --phase stationary --odom rf2o --rf2o-log-level warn
 )
 ```
 
@@ -34,7 +42,7 @@ If pull/startup fails, retain the output and stop; do not rebuild speculatively.
 On laptop PowerShell, copy even if the report says FAIL:
 
 ```powershell
-scp jetbot@100.86.57.31:/home/jetbot/autochair_ros2_ws/experiments/rf2o_quiet_stationary_01_bundle.tar.gz "C:\Senior Year\Senior Design\jetbot_analysis\experiments\rf2o_quiet_stationary_01_bundle.tar.gz"
+scp jetbot@100.86.57.31:/home/jetbot/autochair_ros2_ws/experiments/rf2o_quiet_stationary_02_bundle.tar.gz "C:\Senior Year\Senior Design\jetbot_analysis\experiments\rf2o_quiet_stationary_02_bundle.tar.gz"
 ```
 
 Expected analysis: verify the actual INFO suppression and complete timing
