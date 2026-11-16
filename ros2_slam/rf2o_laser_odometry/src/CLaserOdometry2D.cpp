@@ -66,6 +66,9 @@ void CLaserOdometry2D::init(const sensor_msgs::msg::LaserScan& scan,
 {
   // Obtain laser parametes
   RCLCPP_INFO(get_logger(), "Got first Laser Scan .... Configuring node");
+  if (scan.ranges.size() < 64 || !std::isfinite(scan.angle_increment) ||
+      scan.angle_increment <= 0)
+    throw std::runtime_error("RF2O requires at least 64 positive-angle scan bins");
   width = scan.ranges.size();         // Num of samples (size) of the scan laser
   cols = width;						            // Max resolution. Should be similar to the width parameter
   // Derive the represented angular span from the actual sample spacing.
@@ -95,7 +98,9 @@ void CLaserOdometry2D::init(const sensor_msgs::msg::LaserScan& scan,
 
   // Get the initial laser pose assuming laser is fixed with respect the base_link
   laser_pose_    = robot_initial_pose * laser_pose_on_robot_;
-  laser_oldpose_ = laser_oldpose_;
+  laser_oldpose_ = laser_pose_;
+  robot_pose_ = robot_initial_pose;
+  robot_oldpose_ = robot_pose_;
 
 
   // Init rf2o module (internal)
@@ -105,7 +110,7 @@ void CLaserOdometry2D::init(const sensor_msgs::msg::LaserScan& scan,
   // Resize vectors according to coarse2fine levels
   transformations.resize(ctf_levels);
   for (unsigned int i = 0; i < ctf_levels; i++)
-    transformations[i].resize(3, 3);
+    transformations[i] = Eigen::Matrix3f::Identity();
 
   // Resize pyramid
   unsigned int s, cols_i;
@@ -169,11 +174,16 @@ void CLaserOdometry2D::init(const sensor_msgs::msg::LaserScan& scan,
   g_mask[3] = g_mask[1];
   g_mask[4] = g_mask[0];
 
+  kai_loc_ = kai_loc_level_ = Var = MatrixS31::Zero();
+  lin_speed = ang_speed = 0;
   kai_abs_     = MatrixS31::Zero();
   kai_loc_old_ = MatrixS31::Zero();
 
   module_initialized = true;
   last_odom_time = scan.header.stamp;   // the time of this first scan
+  current_scan_time = scan.header.stamp;
+  range_wf = Eigen::Map<const Eigen::MatrixXf>(scan.ranges.data(), width, 1);
+  createImagePyramid(); // the first real scan is the initial reference
 }
 
 
@@ -211,6 +221,25 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& sc
   //=====================================
   //	DIFERENTIAL  ODOMETRY  MULTILEVEL
   //=====================================
+
+  failure_reason = "none";
+  if (scan.ranges.size() != width || !std::isfinite(scan.angle_increment) ||
+      std::abs(scan.angle_increment * float(width-1) - fovh) > 1e-5f)
+    return rejectEstimate("scan_geometry_changed", false);
+  current_scan_time = scan.header.stamp;
+  const double age = (current_scan_time-last_odom_time).seconds();
+  if (!std::isfinite(age) || age <= 0)
+    return rejectEstimate("nonincreasing_stamp", false);
+  if (age > max_reference_age_s)
+    return rejectEstimate("reference_expired", false);
+  const IncrementCov previous_covariance = cov_odo;
+  auto reject = [&](const char *reason) {
+    cov_odo = previous_covariance;
+    return rejectEstimate(reason, true);
+  };
+  unsigned int solved_levels = 0;
+  // Scratch transforms never survive a rejected attempt.
+  for (auto &transform : transformations) transform.setIdentity();
 
   // copy @param scan to internal variable (we already did it for the previous scan)
   range_wf = Eigen::Map<const Eigen::MatrixXf>(scan.ranges.data(), width, 1);
@@ -256,29 +285,19 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& sc
     // 5. Compute normals
     //computeNormals();
 
+    // No derivative weights or matrix solve without enough usable returns.
+    if (num_valid_range <= 3) continue;
     // 6. Compute weights
     computeWeights();
 
-    // 7. Solve odometry
-    if (num_valid_range > 3)
-    {
-      solveSystemNonLinear();
-      //solveSystemOneLevel();    //without robust-function
-    }
-    else
-    {
-      /// @todo At initialization something
-      /// isn't properly initialized so that
-      /// uninitialized values get propagated
-      /// from 'filterLevelSolution' first call
-      /// Throughout the whole execution. Thus
-      /// this 'continue' that surprisingly works.
-      continue;
-    }
-
-    // 8. Filter solution
-    if (!filterLevelSolution()) return false;
+    if (!solveSystemNonLinear()) return reject(failure_reason);
+    if (!filterLevelSolution()) return reject(failure_reason);
+    ++solved_levels;
   } // end pyramid lvls
+
+  if (!solved_levels) return reject("insufficient_returns");
+  for (const auto &transform : transformations)
+    if (!transform.allFinite()) return reject("nonfinite_transform");
 
   // Get computation time 
   auto m_runtime = get_clock()->now() - start;
@@ -287,10 +306,24 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& sc
 
   // Update poses with the new odom
   PoseUpdate();
-
+  ++accepted_estimates;
   return true;
 }
 
+
+// createImagePyramid swaps the last valid reference into *_old before
+// computing a candidate. Swap back on rejection so the next attempt spans the
+// rejected interval instead of silently losing that motion. Scratch arrays are
+// recomputed on each attempt; accepted pose/time/motion prior remain unchanged.
+bool CLaserOdometry2D::rejectEstimate(const char *reason, bool restore_pyramid)
+{
+  if (restore_pyramid) {
+    range.swap(range_old); xx.swap(xx_old); yy.swap(yy_old);
+  }
+  failure_reason = reason;
+  ++rejected_estimates;
+  return false;
+}
 
 /**
  * Creates the Pyramid (multi-resolution) from the current laser range data
@@ -591,11 +624,13 @@ void CLaserOdometry2D::computeWeights()
           kdtita*(dtita(u)*dtita(u)) +
           k2d*(std::abs(dtitat) + std::abs(dtita2));
 
-      weights(u) = std::sqrt(1.f/w_der);
+      // A zero/nonfinite derivative variance cannot be normalized as inf/inf.
+      weights(u) = (std::isfinite(w_der) && w_der > 0.f) ? std::sqrt(1.f/w_der) : 0.f;
     }
 
-  const float inv_max = 1.f / weights.maxCoeff();
-  weights = inv_max*weights;
+  const float max_weight = weights.maxCoeff();
+  if (std::isfinite(max_weight) && max_weight > 0.f) weights /= max_weight;
+  else weights.setZero();
 }
 
 void CLaserOdometry2D::findNullPoints()
@@ -658,7 +693,7 @@ void CLaserOdometry2D::solveSystemOneLevel()
 }
 
 // Solves the system by considering the Cauchy M-estimator robust-function
-void CLaserOdometry2D::solveSystemNonLinear()
+bool CLaserOdometry2D::solveSystemNonLinear()
 {
   A.resize(num_valid_range, 3); Aw.resize(num_valid_range, 3);
   B.resize(num_valid_range, 1); Bw.resize(num_valid_range, 1);
@@ -688,7 +723,14 @@ void CLaserOdometry2D::solveSystemNonLinear()
   Eigen::MatrixXf AtA, AtB;
   AtA = A.transpose()*A;
   AtB = A.transpose()*B;
+  if (!AtA.allFinite() || !AtB.allFinite()) {
+    failure_reason = "nonfinite_system"; return false;
+  }
+  if (!AtA.fullPivLu().isInvertible()) {
+    failure_reason = "rank_deficient_system"; return false;
+  }
   Var = AtA.ldlt().solve(AtB);
+  if (!Var.allFinite()) { failure_reason = "nonfinite_solution"; return false; }
 
   //Covariance matrix calculation 	Cov Order -> vx,vy,wz
   Eigen::MatrixXf res(num_valid_range,1);
@@ -709,7 +751,9 @@ void CLaserOdometry2D::solveSystemNonLinear()
   //    printf("\n Aver dt = %f, aver res = %f", aver_dt, aver_res);
 
 
-  const float k = 10.f/aver_dt; //200
+  if (!std::isfinite(aver_dt)) { failure_reason = "nonfinite_temporal_scale"; return false; }
+  // Evaluate the Cauchy weight without 10/0 or inf*0. With exactly identical
+  // scans, both scale and residual are zero and the consistent weight is one.
   //float energy = 0.f;
   //for (unsigned int i=0; i<res.rows(); i++)
   //	energy += log(1.f + mrpt::math::square(k*res(i)));
@@ -724,7 +768,10 @@ void CLaserOdometry2D::solveSystemNonLinear()
     for (unsigned int u = 1; u < cols_i-1; u++)
       if (null(u) == 0)
       {
-        const float res_weight = std::sqrt(1.f/(1.f + ((k*res(cont))*(k*res(cont)))));
+        const double residual = res(cont);
+        if (!std::isfinite(residual)) { failure_reason = "nonfinite_residual"; return false; }
+        const float res_weight = aver_dt == 0.f ? (residual == 0. ? 1.f : 0.f) :
+            float(double(aver_dt) / std::hypot(double(aver_dt), 10.*residual));
 
         //Fill the matrix Aw
         Aw(cont,0) = res_weight*A(cont,0);
@@ -737,7 +784,14 @@ void CLaserOdometry2D::solveSystemNonLinear()
     //Solve the linear system of equations using a minimum least squares method
     AtA = Aw.transpose()*Aw;
     AtB = Aw.transpose()*Bw;
+    if (!AtA.allFinite() || !AtB.allFinite()) {
+      failure_reason = "nonfinite_system"; return false;
+    }
+    if (!AtA.fullPivLu().isInvertible()) {
+      failure_reason = "rank_deficient_system"; return false;
+    }
     Var = AtA.ldlt().solve(AtB);
+    if (!Var.allFinite()) { failure_reason = "nonfinite_solution"; return false; }
     res = A*Var - B;
 
     ////Compute the energy
@@ -748,7 +802,9 @@ void CLaserOdometry2D::solveSystemNonLinear()
   }
 
   cov_odo = (1.f/float(num_valid_range-3))*AtA.inverse()*res.squaredNorm();
+  if (!cov_odo.allFinite()) { failure_reason = "nonfinite_covariance"; return false; }
   kai_loc_level_ = Var;
+  return true;
 
   //RCLCPP_INFO_STREAM(get_logger(), "[rf2o] COV_ODO:\n" << cov_odo);
 }
@@ -845,10 +901,11 @@ bool CLaserOdometry2D::filterLevelSolution()
 {
   //		Calculate Eigenvalues and Eigenvectors
   //----------------------------------------------------------
+  if (!cov_odo.allFinite()) { failure_reason = "nonfinite_covariance"; return false; }
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXf> eigensolver(cov_odo);
   if (eigensolver.info() != Eigen::Success)
   {
-    RCLCPP_WARN(get_logger(), "WARNING: Eigensolver couldn't find a solution. Pose is not updated");
+    failure_reason = "eigensolver_failed";
     return false;
   }
 
@@ -860,7 +917,7 @@ bool CLaserOdometry2D::filterLevelSolution()
 
   kai_b = Bii.colPivHouseholderQr().solve(kai_loc_level_);
 
-  assert((kai_loc_level_).isApprox(Bii*kai_b, 1e-5) && "Ax=b has no solution." && __LINE__);
+  if (!kai_b.allFinite()) { failure_reason = "nonfinite_filtered_input"; return false; }
 
   //Second, we have to describe both the old linear and angular speeds in the "eigenvector" basis too
   //-------------------------------------------------------------------------------------------------
@@ -878,14 +935,14 @@ bool CLaserOdometry2D::filterLevelSolution()
     kai_loc_sub(2) = 0.f;
   else
   {
-    kai_loc_sub(2) = -fps*std::acos(acu_trans(0,0))*rf2o::sign(acu_trans(1,0));
+    kai_loc_sub(2) = -fps*std::acos(std::max(-1.f, std::min(1.f, acu_trans(0,0))))*rf2o::sign(acu_trans(1,0));
   }
   kai_loc_sub += kai_loc_old_;
 
   Eigen::Matrix<float,3,1> kai_b_old;
   kai_b_old = Bii.colPivHouseholderQr().solve(kai_loc_sub);
 
-  assert((kai_loc_sub).isApprox(Bii*kai_b_old, 1e-5) && "Ax=b has no solution." && __LINE__);
+  if (!kai_b_old.allFinite()) { failure_reason = "nonfinite_prior"; return false; }
 
   //Filter speed
   const float cf = 15e3f*std::exp(-float(int(level))),
@@ -901,7 +958,7 @@ bool CLaserOdometry2D::filterLevelSolution()
   //Transform filtered speed to local reference frame and compute transformation
   Eigen::Matrix<float, 3, 1> kai_loc_fil = Bii.inverse().colPivHouseholderQr().solve(kai_b_fil);
 
-  assert((kai_b_fil).isApprox(Bii.inverse()*kai_loc_fil, 1e-5) && "Ax=b has no solution." && __LINE__);
+  if (!kai_loc_fil.allFinite()) { failure_reason = "nonfinite_filtered_solution"; return false; }
 
   //transformation
   const float incrx = kai_loc_fil(0)/fps;
@@ -941,7 +998,7 @@ void CLaserOdometry2D::PoseUpdate()
     kai_loc_(2) = 0.f;
   else
   {
-    kai_loc_(2) = fps*std::acos(acu_trans(0,0))*rf2o::sign(acu_trans(1,0));
+    kai_loc_(2) = fps*std::acos(std::max(-1.f, std::min(1.f, acu_trans(0,0))))*rf2o::sign(acu_trans(1,0));
   }
 
   //cout << endl << "Arc cos (incr tita): " << kai_loc_(2);
@@ -970,7 +1027,7 @@ void CLaserOdometry2D::PoseUpdate()
   const float incremental_rotation =
       std::abs(kai_loc_(2) / fps);
 
-  if (incremental_translation < stationary_translation_threshold &&
+  if (suppress_small_motion && incremental_translation < stationary_translation_threshold &&
       incremental_rotation < stationary_rotation_threshold)
   {
     // Zero the complete increment before it is accumulated into the

@@ -22,6 +22,8 @@
 #include <iostream>
 #include <fstream>
 #include <numeric>
+#include <limits>
+#include <stdexcept>
 // ROS headers
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -82,6 +84,12 @@ public:
   bool is_initialized();
 
   bool odometryCalculation(const sensor_msgs::msg::LaserScan& scan);
+  const char * failure_reason = "none";
+  uint64_t accepted_estimates = 0, rejected_estimates = 0;
+  bool suppress_small_motion = true; // explicit legacy comparison; not a validity test
+  static constexpr double max_reference_age_s = 0.35;
+  bool rejectEstimate(const char *reason, bool restore_pyramid);
+
 
   void setLaserPose(const Pose3d& laser_pose);
 
@@ -165,7 +173,7 @@ public:
   void computeWeights();
   void findNullPoints();
   void solveSystemOneLevel();
-  void solveSystemNonLinear();
+  bool solveSystemNonLinear();
   bool filterLevelSolution();
   void PoseUpdate();
   void Reset(const Pose3d& ini_pose/*, CObservation2DRangeScan scan*/);

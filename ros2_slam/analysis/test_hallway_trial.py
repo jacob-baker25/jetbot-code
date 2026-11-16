@@ -33,6 +33,23 @@ def session_method(name, namespace):
 
 
 class HallwayTrialTest(unittest.TestCase):
+    def test_estimate_policy_and_deadband_are_verified(self):
+        base = 'ros2 run rf2o_laser_odometry rf2o_laser_odometry_node --ros-args -p publish_tf:=false'
+        self.assertEqual(runner.rf2o_deadband_command(base, None), base)
+        command = runner.rf2o_deadband_command(base, 'off')
+        self.assertEqual(command.count('--ros-args'), 1)
+        self.assertTrue(command.endswith('-p suppress_small_motion:=false'))
+        self.assertIn('publish_tf:=false', command)
+        marker = 'RF2O_ESTIMATE_POLICY version=1 reference_max_s=0.35 deadband=off'
+        runner.require_estimate_policy(marker+'\n', 'off')
+        for bad in ('', marker.replace('off','legacy'), marker.replace('version=1','version=0')):
+            with self.assertRaises(RuntimeError): runner.require_estimate_policy(bad, 'off')
+        log = marker+'\nRF2O_VALIDITY_SUMMARY {"version":1,"accepted":100,"rejected":2}\n'
+        self.assertTrue(runner.parse_rf2o_validity(log)['complete'])
+        self.assertEqual(runner.parse_rf2o_validity(log)['summaries'][0]['rejected'], 2)
+        self.assertFalse(runner.parse_rf2o_validity(marker)['complete'])
+        self.assertFalse(runner.parse_rf2o_validity(log+'RF2O_REJECT_INPUT bad\n')['complete'])
+
     def test_logging_control_preserves_parameters_and_info_baseline(self):
         import shlex
         for command in ('ros2 run rf2o_laser_odometry rf2o_laser_odometry_node',

@@ -73,6 +73,7 @@ def summarize(root, analysis_path):
     rf2o_log = results[0].parent / 'rf2o.log'
     if rf2o_log.exists():
         report['rf2o_diagnostics'] = parse_rf2o_timing(rf2o_log.read_text(errors='replace'))
+        report['rf2o_validity'] = parse_rf2o_validity(rf2o_log.read_text(errors='replace'))
     report["checkpoint_heading_changes"] = module.checkpoint_deltas(result)
     report["streams"] = {}
     checkpoints = result.get("checkpoints", [])
@@ -126,6 +127,37 @@ def parse_rf2o_timing(log):
             'complete': len(markers) == 1 and len(summaries) == 1 and not errors}
 
 
+def parse_rf2o_validity(log):
+    markers, summaries, inputs, errors = [], [], [], []
+    for line in log.splitlines():
+        if line.startswith('RF2O_ESTIMATE_POLICY '):
+            markers.append(line)
+        for label, target in (('RF2O_VALIDITY_SUMMARY ', summaries), ('RF2O_REJECT_INPUT ', inputs)):
+            if line.startswith(label):
+                try:
+                    target.append(json.loads(line[len(label):]))
+                except ValueError as exc:
+                    errors.append(str(exc))
+    return dict(markers=markers, summaries=summaries, rejected_inputs=inputs,
+                parse_errors=errors, complete=len(markers)==1 and len(summaries)==1 and not errors)
+
+
+def rf2o_deadband_command(command, mode):
+    if mode is None:
+        return command
+    if mode not in ('legacy', 'off'):
+        raise ValueError('Unknown RF2O deadband mode')
+    if '--ros-args' not in command.split():
+        command += ' --ros-args'
+    return command + ' -p suppress_small_motion:=' + ('false' if mode=='off' else 'true')
+
+
+def require_estimate_policy(log, mode):
+    expected = 'RF2O_ESTIMATE_POLICY version=1 reference_max_s=0.35 deadband='+mode
+    if expected not in log.splitlines():
+        raise RuntimeError('RF2O estimate-policy marker missing/mismatched; build/deploy candidate before trial')
+
+
 def rf2o_logging_command(command, level):
     if level not in ('info', 'warn'):
         raise ValueError('RF2O logging comparison supports info or warn')
@@ -157,6 +189,8 @@ def main():
     parser.add_argument("--odom", choices=("imu_yaw", "rf2o"), default="imu_yaw")
     parser.add_argument("--rf2o-log-level", choices=("info", "warn"), default="info",
                         help="RF2O process only; warn suppresses routine per-scan INFO")
+    parser.add_argument('--rf2o-deadband', choices=('legacy','off'), default=None,
+                        help='Requires candidate estimate-policy marker; default leaves binary setting unchanged')
     args = parser.parse_args()
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,70}$", args.name):
         parser.error("Use a short name containing letters, digits, underscores or hyphens")
@@ -175,6 +209,7 @@ def main():
     manifest = {"name": args.name, "phase": args.phase, "odom": args.odom,
                 "rf2o_log_level": args.rf2o_log_level,
                 "rf2o_log_scope": "process_default",
+                "rf2o_deadband": args.rf2o_deadband,
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
                 "installed_local_nodes_modified": False, "status": "starting"}
@@ -212,9 +247,19 @@ def main():
             def start_process(self, name, command):
                 if name == 'rf2o':
                     command = rf2o_logging_command(command, args.rf2o_log_level)
+                    command = rf2o_deadband_command(command, args.rf2o_deadband)
                     manifest['rf2o_command'] = command
                     write_json(root / 'trial_manifest.json', manifest)
                 return super(TrialSession, self).start_process(name, command)
+
+            def verify_odom_source(self):
+                if not super(TrialSession, self).verify_odom_source():
+                    return False
+                if args.rf2o_deadband is not None:
+                    require_estimate_policy(Path(self.process_log_paths['rf2o']).read_text(),
+                                            args.rf2o_deadband)
+                    print('RF2O estimate policy: PASS; deadband='+args.rf2o_deadband, flush=True)
+                return True
 
             def __init__(self, *values):
                 super(TrialSession, self).__init__(*values)

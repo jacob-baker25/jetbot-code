@@ -7,9 +7,12 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import sys
 
 
 FILES = ['src/CLaserOdometry2DNode.cpp',
+         'src/CLaserOdometry2D.cpp',
+         'include/rf2o_laser_odometry/CLaserOdometry2D.hpp',
          'include/rf2o_laser_odometry/CLaserOdometry2DNode.hpp',
          'include/rf2o_laser_odometry/TimingDiagnostics.hpp',
          'CMakeLists.txt', 'package.xml']
@@ -75,6 +78,7 @@ def main_scope_fixture(source):
         raise RuntimeError('Could not isolate RF2O main() for scope regression')
     return '''#include <memory>
 #include <iostream>
+#include <stdexcept>
 #include "rf2o_laser_odometry/TimingDiagnostics.hpp"
 namespace rf2o {
 class CLaserOdometry2DNode {
@@ -107,6 +111,17 @@ def check_main_scope(source, directory, compiler='c++'):
         raise RuntimeError('Main scope execution test failed')
     # Demonstrate that this test detects the exact previously missed defect.
     original = fixture.read_text()
+    # Expired-reference errors must return failure AND destroy the node so its
+    # shutdown diagnostics survive. An uncaught rethrow may skip destruction.
+    failure_case = original.replace('void process() {}',
+        'void process() { throw std::runtime_error("test_expiry"); }\n'
+        '  ~CLaserOdometry2DNode() { std::cerr << "NODE_DESTROYED"; }')
+    fixture.write_text(failure_case)
+    subprocess.check_call(command)
+    failed = subprocess.run([executable], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, universal_newlines=True)
+    if failed.returncode != 1 or 'RF2O_FATAL test_expiry' not in failed.stderr or 'NODE_DESTROYED' not in failed.stderr:
+        raise RuntimeError('Fatal exit did not preserve shutdown diagnostics')
     fixture.write_text(original.replace('rf2o::TimingScope', 'TimingScope')
                       .replace('rf2o::TimingDiagnostics', 'TimingDiagnostics'))
     rejected = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -134,6 +149,9 @@ def main():
         if summary['event_count'] != 102 or len(summary['events']) != 64:
             raise RuntimeError('Diagnostics C++ test failed; no source files changed')
         check_main_scope(source, directory)
+    # Exercise the actual Eigen calculation and node process body before copying
+    # any sources. Uses the Jetson's already installed compiler/Eigen headers.
+    subprocess.check_call([sys.executable, str(root/'analysis/run_rf2o_core_tests.py')])
     print('Diagnostics C++14 test: PASS')
     print('Actual main() scope regression: PASS (ROS interfaces stubbed; colcon build still required)')
     backup = deploy(source, target, args.workspace / 'backups', baseline)

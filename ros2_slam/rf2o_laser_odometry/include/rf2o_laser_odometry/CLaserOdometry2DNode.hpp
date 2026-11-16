@@ -17,6 +17,7 @@ class CLaserOdometry2DNode : public rclcpp::Node
 public:
   TimingDiagnostics timing;
   CLaserOdometry2DNode();
+  ~CLaserOdometry2DNode();
   void process();
   void publish();
   bool setLaserPoseFromTf();
@@ -24,7 +25,7 @@ public:
 
   // Params & vars
   CLaserOdometry2D    rf2o_ref;
-  bool                publish_tf, new_scan_available;
+  bool                publish_tf, new_scan_available=false;
   double              freq;
   std::string         laser_scan_topic;
   std::string         odom_topic;
@@ -33,6 +34,13 @@ public:
   std::string         init_pose_from_topic;
 
   sensor_msgs::msg::LaserScan                     last_scan;
+  sensor_msgs::msg::LaserScan                     last_valid_scan;
+  struct FailureInput {
+    std::string reason;
+    sensor_msgs::msg::LaserScan reference, candidate;
+    MatrixS31 prior;
+  };
+  std::vector<FailureInput> failure_inputs; // first three only, emitted at shutdown
   bool                                            GT_pose_initialized;
   std::shared_ptr<tf2_ros::Buffer>                buffer_;
   std::shared_ptr<tf2_ros::TransformListener>     tf_listener_;  

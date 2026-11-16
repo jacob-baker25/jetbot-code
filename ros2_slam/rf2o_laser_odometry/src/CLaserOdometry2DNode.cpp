@@ -43,6 +43,10 @@ CLaserOdometry2DNode::CLaserOdometry2DNode(): Node("CLaserOdometry2DNode")
   this->get_parameter("freq", freq);
   this->declare_parameter<bool>("timing_diagnostics", true);
   this->get_parameter("timing_diagnostics", timing.enabled);
+  this->declare_parameter<bool>("suppress_small_motion", true);
+  this->get_parameter("suppress_small_motion", rf2o_ref.suppress_small_motion);
+  std::cerr << "RF2O_ESTIMATE_POLICY version=1 reference_max_s=0.35 deadband="
+            << (rf2o_ref.suppress_small_motion ? "legacy" : "off") << std::endl;
   if (timing.enabled) {
     std::cerr << "RF2O_TIMING_ENABLED version=1 rmw="
               << rmw_get_implementation_identifier() << std::endl;
@@ -71,7 +75,7 @@ CLaserOdometry2DNode::CLaserOdometry2DNode(): Node("CLaserOdometry2DNode")
     initial_robot_pose.pose.pose.position.x = 0;
     initial_robot_pose.pose.pose.position.y = 0;
     initial_robot_pose.pose.pose.position.z = 0;
-    initial_robot_pose.pose.pose.orientation.w = 0;
+    initial_robot_pose.pose.pose.orientation.w = 1;
     initial_robot_pose.pose.pose.orientation.x = 0;
     initial_robot_pose.pose.pose.orientation.y = 0;
     initial_robot_pose.pose.pose.orientation.z = 0;
@@ -87,6 +91,41 @@ CLaserOdometry2DNode::CLaserOdometry2DNode(): Node("CLaserOdometry2DNode")
  * Keeps the last scan from the 2D lidar to be latter processed
  * On the first laser scan, the node is initialized.
 */
+CLaserOdometry2DNode::~CLaserOdometry2DNode()
+{
+  std::cerr << "RF2O_VALIDITY_SUMMARY {\"version\":1,\"accepted\":"
+            << rf2o_ref.accepted_estimates << ",\"rejected\":"
+            << rf2o_ref.rejected_estimates << ",\"last_reason\":\""
+            << rf2o_ref.failure_reason << "\"}" << std::endl;
+  // Capture enough input to investigate numerical failures without another
+  // full-rate recorder or per-scan I/O. Nonfinite missing returns encode null.
+  auto scan_json = [](const sensor_msgs::msg::LaserScan &scan) {
+    std::cerr << "{\"sec\":" << scan.header.stamp.sec << ",\"nanosec\":"
+      << scan.header.stamp.nanosec << ",\"angle_increment\":";
+    if (std::isfinite(scan.angle_increment)) std::cerr << scan.angle_increment;
+    else std::cerr << "null";
+    std::cerr << ",\"ranges\":[";
+    for (size_t i=0;i<scan.ranges.size();++i) {
+      if (i) std::cerr << ',';
+      if (std::isfinite(scan.ranges[i])) std::cerr << scan.ranges[i];
+      else std::cerr << "null";
+    }
+    std::cerr << "]}";
+  };
+  for (const auto &failure : failure_inputs) {
+    std::cerr << "RF2O_REJECT_INPUT {\"reason\":\"" << failure.reason << "\",\"reference\":";
+    scan_json(failure.reference);
+    std::cerr << ",\"candidate\":"; scan_json(failure.candidate);
+    std::cerr << ",\"motion_prior\":[";
+    for (int i=0;i<3;++i) {
+      if (i) std::cerr << ',';
+      if (std::isfinite(failure.prior(i))) std::cerr << failure.prior(i);
+      else std::cerr << "null";
+    }
+    std::cerr << "]}" << std::endl;
+  }
+}
+
 void CLaserOdometry2DNode::LaserCallBack(const sensor_msgs::msg::LaserScan::SharedPtr new_scan)
 {
   TimingScope callback_timing(timing, TimingDiagnostics::CALLBACK);
@@ -102,17 +141,15 @@ void CLaserOdometry2DNode::LaserCallBack(const sensor_msgs::msg::LaserScan::Shar
     
     if (rf2o_ref.first_laser_scan == false)
     {
-      // copy laser range data to rf2o internal variable
-      for (unsigned int i = 0; i < rf2o_ref.width; i++)
-        rf2o_ref.range_wf(i) = new_scan->ranges[i];
-      // inform of new scan available
+      // Geometry is validated in odometryCalculation before indexing ranges.
       new_scan_available = true;
     }
     else
     {
       // Initialize module on first scan (from laser params)
-      setLaserPoseFromTf();
+      if (!setLaserPoseFromTf()) return;
       rf2o_ref.init(last_scan, initial_robot_pose.pose.pose);
+      last_valid_scan = last_scan;
       rf2o_ref.first_laser_scan = false;
     }
   }
@@ -136,7 +173,7 @@ bool CLaserOdometry2DNode::setLaserPoseFromTf()
   catch (tf2::TransformException &ex)
   {
     RCLCPP_ERROR(get_logger(), "%s",ex.what());
-    retrieved = false;
+    return false;
   }
 
   // Keep this transform as Eigen Matrix3d
@@ -179,16 +216,29 @@ void CLaserOdometry2DNode::process()
   if( rf2o_ref.is_initialized() && scan_available() )
   {
     // Process odometry estimation
+    bool valid = false;
     {
       TimingScope compute_timing(timing, TimingDiagnostics::COMPUTE);
-      rf2o_ref.odometryCalculation(last_scan);
+      valid = rf2o_ref.odometryCalculation(last_scan);
     }
-
-    // Publish odometry over ROS2 (tf/topic)
-    publish();
-
-    // Do not run on the same data!
+    // Consume this attempt even when rejected. Never publish its stale pose.
     new_scan_available = false;
+    if (valid) {
+      last_valid_scan = last_scan;
+      publish();
+    } else {
+      if (failure_inputs.size() < 3) {
+        failure_inputs.push_back({rf2o_ref.failure_reason, last_valid_scan,
+                                  last_scan, rf2o_ref.kai_loc_old_});
+      }
+      const auto rejected = rf2o_ref.rejected_estimates;
+      // Bounded log rate: first three failures, then powers of two.
+      if (rejected <= 3 || (rejected & (rejected-1)) == 0)
+        RCLCPP_WARN(get_logger(), "RF2O_REJECT reason=%s count=%llu",
+                    rf2o_ref.failure_reason, static_cast<unsigned long long>(rejected));
+      if (std::string(rf2o_ref.failure_reason) == "reference_expired")
+        throw std::runtime_error("RF2O_REFERENCE_EXPIRED: restart from a stationary pose");
+    }
   }
   else
   {
@@ -301,9 +351,16 @@ int main(int argc, char** argv)
         rate.sleep();
       }
     }
+  } catch (const std::exception &error) {
+    if (timing.enabled) timing.write(std::cerr);
+    std::cerr << "RF2O_FATAL " << error.what() << std::endl;
+    // Return normally with failure so the node destructor saves bounded inputs.
+    // Rethrowing out of main need not unwind locals before std::terminate.
+    return 1;
   } catch (...) {
     if (timing.enabled) timing.write(std::cerr);
-    throw;
+    std::cerr << "RF2O_FATAL unknown exception" << std::endl;
+    return 1;
   }
   if (timing.enabled) timing.write(std::cerr);
   return 0;

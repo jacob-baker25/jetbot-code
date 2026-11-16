@@ -66,11 +66,9 @@ class RF2OTimingTest(unittest.TestCase):
             source = ROOT / 'rf2o_laser_odometry'
             shutil.copytree(str(source), str(target))
             node = target / 'src/CLaserOdometry2DNode.cpp'
-            text = node.read_text()
-            prefix, main = text.split('int main(int argc, char** argv)', 1)
-            main = main.replace('rf2o::TimingScope', 'TimingScope').replace(
-                'rf2o::TimingDiagnostics', 'TimingDiagnostics')
-            node.write_text(prefix + 'int main(int argc, char** argv)' + main)
+            old = subprocess.check_output(['git', '-c', 'safe.directory='+str(ROOT.parent).replace('\\', '/'),
+                'show', '84b79bf:ros2_slam/rf2o_laser_odometry/src/CLaserOdometry2DNode.cpp'], cwd=str(ROOT.parent))
+            node.write_bytes(old)
             self.assertEqual(deploy.digest(node),
                 '9da90f14ca8967e924ce363481db2721d5702dd03a958bfffae278a617bc60ea')
             before = node.read_bytes()
@@ -79,8 +77,25 @@ class RF2OTimingTest(unittest.TestCase):
             self.assertEqual((backup / 'src/CLaserOdometry2DNode.cpp').read_bytes(), before)
             self.assertEqual(deploy.digest(node), deploy.digest(source / 'src/CLaserOdometry2DNode.cpp'))
 
+    def test_upgrade_from_actual_pre_repair_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory); target = base / 'src'
+            source = ROOT / 'rf2o_laser_odometry'
+            target.mkdir()
+            for rel in deploy.FILES:
+                data = subprocess.check_output(['git', '-c', 'safe.directory='+str(ROOT.parent).replace('\\', '/'),
+                    'show', 'f2d288b:ros2_slam/rf2o_laser_odometry/'+rel], cwd=str(ROOT.parent))
+                path = target / rel; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(data)
+            before = {rel:(target/rel).read_bytes() for rel in deploy.FILES}
+            baseline = json.loads((ROOT / 'rf2o_timing_baseline.json').read_text())
+            backup = deploy.deploy(source, target, base/'backups', baseline)
+            for rel in deploy.FILES:
+                self.assertEqual((backup/rel).read_bytes(), before[rel])
+                self.assertEqual(deploy.digest(target/rel), deploy.digest(source/rel))
+
     def test_python36_syntax(self):
-        ast.parse((ROOT / 'deploy_rf2o_timing.py').read_text(), feature_version=(3, 6))
+        for path in ('deploy_rf2o_timing.py','analysis/run_rf2o_core_tests.py'):
+            ast.parse((ROOT / path).read_text(), feature_version=(3, 6))
 
     def test_cpp14_diagnostics_if_compiler_available(self):
         compiler = shutil.which('g++') or shutil.which('clang++')
