@@ -67,11 +67,13 @@ must compile and pass on the Jetson before deployment. The script backs up all
 replaced files, prints the backup path, and records hashes in deployment.json.
 It copies only the node implementation/header, new timing header and two build
 metadata files. It does not overwrite CLaserOdometry2D.cpp or Python local_nodes.
+The backups directory receives COLCON_IGNORE before any package files are copied,
+so colcon cannot discover the backed-up package.xml as a duplicate package.
 
 ```bash
 cd ~/autochair_ros2_ws
 source /opt/ros/eloquent/setup.bash
-colcon build --packages-select rf2o_laser_odometry --symlink-install --cmake-args -DBUILD_TESTING=OFF
+colcon build --base-paths src --packages-select rf2o_laser_odometry --symlink-install --cmake-args -DBUILD_TESTING=OFF
 ```
 
 After build SUCCESS:

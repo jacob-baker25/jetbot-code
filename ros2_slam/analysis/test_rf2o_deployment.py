@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,8 +29,19 @@ class RF2OTimingTest(unittest.TestCase):
             shutil.copytree(str(source), str(target))
             baseline = json.loads((ROOT / 'rf2o_timing_baseline.json').read_text())
             old = (target / deploy.FILES[0]).read_bytes()
-            backup = deploy.deploy(source, target, base / 'backups', baseline)
+            backup_root = base / 'backups'
+            legacy = backup_root / 'earlier_backup'
+            legacy.mkdir(parents=True)
+            (legacy / 'package.xml').write_text('preserved older backup')
+            real_copy = shutil.copy2
+            def checked_copy(*args, **kwargs):
+                self.assertTrue((backup_root / 'COLCON_IGNORE').is_file())
+                return real_copy(*args, **kwargs)
+            with mock.patch.object(deploy.shutil, 'copy2', side_effect=checked_copy):
+                backup = deploy.deploy(source, target, backup_root, baseline)
             self.assertEqual((backup / deploy.FILES[0]).read_bytes(), old)
+            self.assertEqual((legacy / 'package.xml').read_text(), 'preserved older backup')
+            self.assertFalse((target / 'COLCON_IGNORE').exists())
             changed = target / 'src/CLaserOdometry2D.cpp'
             changed.write_text('unreviewed odometry algorithm')
             before = {str(p.relative_to(target)):p.read_bytes() for p in target.rglob('*') if p.is_file()}
@@ -37,7 +49,7 @@ class RF2OTimingTest(unittest.TestCase):
                 deploy.deploy(source, target, base / 'backups', baseline)
             after = {str(p.relative_to(target)):p.read_bytes() for p in target.rglob('*') if p.is_file()}
             self.assertEqual(before, after)
-            self.assertEqual(len(list((base / 'backups').iterdir())), 1)
+            self.assertEqual(len([p for p in backup_root.iterdir() if p.is_dir()]), 2)
 
     def test_missing_or_broken_summary_never_qualifies_diagnostics(self):
         marker = 'RF2O_TIMING_ENABLED version=1 rmw=test\n'

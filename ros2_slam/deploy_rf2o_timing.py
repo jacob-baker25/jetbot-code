@@ -40,6 +40,9 @@ def validate(source, target, baseline):
 def deploy(source, target, backup_root, baseline):
     validate(source, target, baseline)
     backup_root.mkdir(parents=True, exist_ok=True)
+    # Backups include package.xml. Exclude the entire backup tree from colcon's
+    # default recursive workspace discovery before copying any package files.
+    (backup_root / 'COLCON_IGNORE').touch(exist_ok=True)
     backup = Path(tempfile.mkdtemp(prefix='rf2o_timing_', dir=str(backup_root)))
     manifest = {'files': {}, 'build_required': True}
     # Finish all backups before replacing any file.
