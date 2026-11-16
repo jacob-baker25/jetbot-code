@@ -192,6 +192,19 @@ class SessionTimingTest(unittest.TestCase):
         self.assertTrue(timing.evaluate(*self.fixture())["passed"])
         self.assertFalse(timing.evaluate(*self.fixture(1.0))["passed"])
 
+    def test_repeated_stamp_does_not_invent_future_dated_measurement(self):
+        result, trajectory, records = self.fixture()
+        original = next(r for r in records if r.get('topic') == '/odom_rf2o')
+        duplicate = dict(original, unix_s=original['unix_s'] + .2,
+                         ros_age_s=original['ros_age_s'] + .2)
+        records.append(duplicate)
+        report = timing.evaluate(result, trajectory, records)
+        self.assertFalse(report['passed'])
+        self.assertEqual(report['metrics']['repeated_odom_stamp_keys'], 1)
+        self.assertGreater(report['metrics']['ambiguous_trajectory_rows_skipped'], 0)
+        self.assertTrue(any('Repeated odometry' in e for e in report['errors']))
+        self.assertFalse(any('Future-dated' in e for e in report['errors']))
+
     def test_sparse_incomplete_and_future_data_do_not_pass(self):
         result, tr, cap = self.fixture()
         self.assertFalse(timing.evaluate(result, tr[:20], cap)["passed"])

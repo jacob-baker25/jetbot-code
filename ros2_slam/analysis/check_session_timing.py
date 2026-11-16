@@ -28,10 +28,21 @@ def evaluate(result, trajectory, records):
     quiet = next((r for r in records if r.get("kind") == "start"), {})
     if not quiet.get("quiet_memory") or not quiet.get("include_odom"):
         errors.append("Use --quiet-memory --include-odom capture")
-    fused = {r["stamp_ns"]: r for r in records
-             if r.get("kind") == "odom" and r.get("topic") == "/odom_rf2o"}
+    fused = {}
+    repeated_stamps = set()
+    for record in records:
+        if record.get("kind") != "odom" or record.get("topic") != "/odom_rf2o":
+            continue
+        stamp = record["stamp_ns"]
+        if stamp in fused:
+            repeated_stamps.add(stamp)
+        else:
+            fused[stamp] = record
+    if repeated_stamps:
+        errors.append("Repeated odometry timestamps prevent unambiguous receipt matching")
     keys = sorted(fused)
     pairs = []
+    ambiguous_rows = 0
     if start and final:
         for row in trajectory:
             recorded = float(row["time_unix"])
@@ -45,6 +56,9 @@ def evaluate(result, trajectory, records):
             key = min(choices, key=lambda k: abs(k - stamp))
             if abs(key - stamp) >= 1000:
                 continue
+            if key in repeated_stamps:
+                ambiguous_rows += 1
+                continue
             observed = fused[key]
             values = (recorded, float(row["rf2o_age_s"]),
                       recorded - observed["unix_s"], observed["ros_age_s"])
@@ -56,6 +70,8 @@ def evaluate(result, trajectory, records):
     if len(pairs) < 100 or span < 10:
         errors.append("Need at least 100 matched trajectory rows spanning 10 seconds")
     metrics = {
+        "repeated_odom_stamp_keys": len(repeated_stamps),
+        "ambiguous_trajectory_rows_skipped": ambiguous_rows,
         "matched_rows": len(pairs), "matched_span_s": span,
         "session_age_median_s": percentile([p[1] for p in pairs], .5),
         "session_age_p95_s": percentile([p[1] for p in pairs], .95),
@@ -66,8 +82,10 @@ def evaluate(result, trajectory, records):
                        ("session_extra_lag_median_s", .1), ("observer_fused_age_p95_s", .25)):
         if metrics[key] is not None and metrics[key] > limit:
             errors.append("{} exceeds {:.3f}s target".format(key, limit))
-    if any(p[1] < -.05 or p[3] < -.05 or p[2] < -.05 for p in pairs):
+    if any(p[1] < -.05 or p[3] < -.05 for p in pairs):
         errors.append("Future-dated measurement or inconsistent receiver clocks")
+    if any(p[2] < -.05 for p in pairs):
+        errors.append("Observer received a matched message over 50ms after the session; inspect delivery and clocks")
     return {"passed": not errors, "errors": sorted(set(errors)), "metrics": metrics}
 
 
