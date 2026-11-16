@@ -60,6 +60,25 @@ class RF2OTimingTest(unittest.TestCase):
         self.assertTrue(good['complete'])
         self.assertFalse(runner.parse_rf2o_timing(marker*2+'RF2O_TIMING_SUMMARY {}')['complete'])
 
+    def test_upgrading_previous_deployed_node_is_accepted_and_backed_up(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory); target = base / 'src'
+            source = ROOT / 'rf2o_laser_odometry'
+            shutil.copytree(str(source), str(target))
+            node = target / 'src/CLaserOdometry2DNode.cpp'
+            text = node.read_text()
+            prefix, main = text.split('int main(int argc, char** argv)', 1)
+            main = main.replace('rf2o::TimingScope', 'TimingScope').replace(
+                'rf2o::TimingDiagnostics', 'TimingDiagnostics')
+            node.write_text(prefix + 'int main(int argc, char** argv)' + main)
+            self.assertEqual(deploy.digest(node),
+                '9da90f14ca8967e924ce363481db2721d5702dd03a958bfffae278a617bc60ea')
+            before = node.read_bytes()
+            baseline = json.loads((ROOT / 'rf2o_timing_baseline.json').read_text())
+            backup = deploy.deploy(source, target, base / 'backups', baseline)
+            self.assertEqual((backup / 'src/CLaserOdometry2DNode.cpp').read_bytes(), before)
+            self.assertEqual(deploy.digest(node), deploy.digest(source / 'src/CLaserOdometry2DNode.cpp'))
+
     def test_python36_syntax(self):
         ast.parse((ROOT / 'deploy_rf2o_timing.py').read_text(), feature_version=(3, 6))
 
@@ -76,3 +95,4 @@ class RF2OTimingTest(unittest.TestCase):
             summary = json.loads(output.split('RF2O_TIMING_SUMMARY ', 1)[1])
             self.assertEqual(len(summary['events']), 64)
             self.assertEqual(summary['event_count'], 102)
+            deploy.check_main_scope(ROOT / 'rf2o_laser_odometry', directory, compiler)

@@ -287,17 +287,17 @@ int main(int argc, char** argv)
   try {
     while (rclcpp::ok()) {
       if (timing.enabled) {
-        const double now=TimingDiagnostics::now();
-        if (previous_loop!=0) timing.record(TimingDiagnostics::LOOP_GAP,now-previous_loop,now);
+        const double now=rf2o::TimingDiagnostics::now();
+        if (previous_loop!=0) timing.record(rf2o::TimingDiagnostics::LOOP_GAP,now-previous_loop,now);
         previous_loop=now;
       }
       {
-        TimingScope spin_timing(timing, TimingDiagnostics::SPIN);
+        rf2o::TimingScope spin_timing(timing, rf2o::TimingDiagnostics::SPIN);
         rclcpp::spin_some(myLaserOdomNode);
       }
       myLaserOdomNode->process();
       {
-        TimingScope sleep_timing(timing, TimingDiagnostics::SLEEP);
+        rf2o::TimingScope sleep_timing(timing, rf2o::TimingDiagnostics::SLEEP);
         rate.sleep();
       }
     }

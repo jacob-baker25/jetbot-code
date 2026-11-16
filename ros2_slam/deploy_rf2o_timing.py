@@ -22,10 +22,11 @@ def digest(path):
 def validate(source, target, baseline):
     errors = []
     for rel, old_hash in baseline.items():
+        accepted = old_hash if isinstance(old_hash, list) else [old_hash]
         current = target / rel
         if not current.is_file():
             errors.append('Missing installed source: ' + rel)
-        elif digest(current) not in (old_hash, digest(source / rel)):
+        elif digest(current) not in accepted + [digest(source / rel)]:
             errors.append('Unexpected local changes: ' + rel)
     for rel in FILES:
         if not (source / rel).is_file():
@@ -64,6 +65,55 @@ def deploy(source, target, backup_root, baseline):
     return backup
 
 
+def main_scope_fixture(source):
+    # Compile the REAL main() at global scope, as in the legacy translation unit.
+    # Only the ROS interface is stubbed; the diagnostics header is real. The
+    # original header-only test did not exercise these namespace references.
+    cpp = (source / 'src/CLaserOdometry2DNode.cpp').read_text()
+    signature = 'int main(int argc, char** argv)'
+    if cpp.count(signature) != 1:
+        raise RuntimeError('Could not isolate RF2O main() for scope regression')
+    return '''#include <memory>
+#include <iostream>
+#include "rf2o_laser_odometry/TimingDiagnostics.hpp"
+namespace rf2o {
+class CLaserOdometry2DNode {
+public:
+  TimingDiagnostics timing;
+  double freq=10.;
+  void process() {}
+};
+}
+namespace rclcpp {
+inline void init(int, char**) {}
+inline bool ok() { static int remaining=2; return remaining-- > 0; }
+struct Rate { explicit Rate(double) {} void sleep() {} };
+template<typename T> void spin_some(const std::shared_ptr<T>&) {}
+}
+''' + cpp[cpp.index(signature):]
+
+
+def check_main_scope(source, directory, compiler='c++'):
+    fixture = Path(directory) / 'main_scope.cpp'
+    executable = str(Path(directory) / 'main_scope_test.exe')
+    fixture.write_text(main_scope_fixture(source))
+    command = [compiler, '-std=c++14', '-Wall', '-Wextra', '-pedantic',
+               '-I' + str(source / 'include'), str(fixture), '-o', executable]
+    subprocess.check_call(command)
+    output = subprocess.check_output([executable], stderr=subprocess.STDOUT,
+                                     universal_newlines=True)
+    summary = json.loads(output.split('RF2O_TIMING_SUMMARY ', 1)[1])
+    if summary['metrics']['spin']['count'] != 2 or summary['metrics']['rate_sleep']['count'] != 2:
+        raise RuntimeError('Main scope execution test failed')
+    # Demonstrate that this test detects the exact previously missed defect.
+    original = fixture.read_text()
+    fixture.write_text(original.replace('rf2o::TimingScope', 'TimingScope')
+                      .replace('rf2o::TimingDiagnostics', 'TimingDiagnostics'))
+    rejected = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if rejected.returncode == 0:
+        raise RuntimeError('Regression test unexpectedly accepted unqualified main types')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', type=Path, default=Path.home() / 'autochair_ros2_ws')
@@ -83,7 +133,9 @@ def main():
         summary = json.loads(output.split('RF2O_TIMING_SUMMARY ', 1)[1])
         if summary['event_count'] != 102 or len(summary['events']) != 64:
             raise RuntimeError('Diagnostics C++ test failed; no source files changed')
+        check_main_scope(source, directory)
     print('Diagnostics C++14 test: PASS')
+    print('Actual main() scope regression: PASS (ROS interfaces stubbed; colcon build still required)')
     backup = deploy(source, target, args.workspace / 'backups', baseline)
     print('Backup: {}\nBuild RF2O before running the trial. No other package needs rebuilding.'.format(backup))
 

@@ -51,6 +51,15 @@ https://discourse.openrobotics.org/t/ros2-and-dds-ipr-issues/13481/20
 
 ## Install once and build only RF2O
 
+Compiler repair (2026-11-16): the legacy node header opens namespace rf2o and
+the implementation closes it before global main(). Timing types in main now use
+explicit rf2o:: qualification. Deployment accepts the exact prior instrumented
+node hash as an upgrade input, in addition to original/candidate source hashes.
+It backs up that version before replacement. The portable test now also compiles
+the REAL main() body with minimal ROS stubs, runs two iterations, and confirms
+that removing namespace qualification recreates a compilation failure. This
+covers the missed scope integration; it does not replace the actual ROS build.
+
 No running mapping trial should overlap this source/build change. Preserve
 unexpected edits; if pull, source validation, test, or build fails, stop there.
 
@@ -82,8 +91,27 @@ After build SUCCESS:
 source ~/autochair_ros2_ws/install/rf2o_laser_odometry/share/rf2o_laser_odometry/local_setup.bash
 source ~/autochair_ros2_ws/install/slam_toolbox/share/slam_toolbox/local_setup.bash
 ros2 pkg prefix rf2o_laser_odometry
+```
+
+Verify the executable in the same login-shell environment used by the launcher:
+
+```bash
+bash -lc '
+source /opt/ros/eloquent/setup.bash
+source "$HOME/autochair_ros2_ws/install/setup.bash" >/dev/null 2>&1 || true
+RF2O_PREFIX=$(ros2 pkg prefix rf2o_laser_odometry) || exit 1
+RF2O_BIN="$RF2O_PREFIX/lib/rf2o_laser_odometry/rf2o_laser_odometry_node"
+printf "Selected executable: %s\n" "$RF2O_BIN"
+grep -aFq "RF2O_TIMING_ENABLED version=1" "$RF2O_BIN" || exit 1
+echo "Instrumented binary: FOUND"
+'
+```
+
+Only after that succeeds, run the new trial (01 already exists):
+
+```bash
 cd ~/jetbot-code-f03243c
-python3 ros2_slam/run_hallway_trial.py rf2o_stage_stationary_01 --phase stationary --odom rf2o
+python3 ros2_slam/run_hallway_trial.py rf2o_stage_stationary_02 --phase stationary --odom rf2o
 ```
 
 Prefix must be /home/jetbot/autochair_ros2_ws/install/rf2o_laser_odometry. Keep
@@ -93,7 +121,7 @@ The runner handles observation, RAM logging and archiving after shutdown.
 Copy the archive on laptop PowerShell, even if the session fails:
 
 ```powershell
-scp jetbot@100.86.57.31:/home/jetbot/autochair_ros2_ws/experiments/rf2o_stage_stationary_01_bundle.tar.gz "C:\Senior Year\Senior Design\jetbot_analysis\experiments\rf2o_stage_stationary_01_bundle.tar.gz"
+scp jetbot@100.86.57.31:/home/jetbot/autochair_ros2_ws/experiments/rf2o_stage_stationary_02_bundle.tar.gz "C:\Senior Year\Senior Design\jetbot_analysis\experiments\rf2o_stage_stationary_02_bundle.tar.gz"
 ```
 
 If build/deployment fails, paste that output; do not launch the trial against an
@@ -122,7 +150,7 @@ entire ROS stack based solely on these observations.
 
 ## Validation limits
 
-75 local tests: 73 passed, 2 skipped because no local C++ compiler is available.
+77 local tests: 75 passed, 2 skipped because no local C++ compiler is available.
 Python checks cover guarded deployment/no edits on unexpected input, backups,
 summary parsing, existing runner/session behavior and Python 3.6 syntax. The
 portable C++14 test covers bounded event retention, counts, timestamps and
