@@ -5,6 +5,15 @@ demonstrate repeatable localization after restart. Next target: a short supervis
 autonomous goal on that map. Full-building navigation and production-grade
 recovery are outside this deadline. Demonstrate only what has actually passed.
 
+2026-11-17 deployment correction: 067b2ea stopped in the standalone compiler
+test with `cstdlib: fatal error: stdlib.h: No such file or directory`. The test
+harness explicitly added `-isystem /usr/include`, disrupting GCC's include_next
+search order. This was reproduced locally. The harness now leaves that built-in
+directory in its normal position, while still adding the Eigen subdirectory and
+supporting custom Eigen roots. No ROS source was deployed by that failed attempt;
+no package reinstall or algorithm change is called for. Pull the correction and
+repeat the build block below before attempting the stationary trial.
+
 ## Implemented candidate and why
 
 The actual RF2O core was compiled locally with Eigen 3.3.7 and minimal ROS

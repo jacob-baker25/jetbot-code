@@ -20,9 +20,33 @@ def load(name, path):
 
 deploy = load('rf2o_deploy_test', ROOT / 'deploy_rf2o_timing.py')
 runner = load('rf2o_runner_test', ROOT / 'run_hallway_trial.py')
+core_tests = load('rf2o_core_harness_test', ROOT / 'analysis/run_rf2o_core_tests.py')
 
 
 class RF2OTimingTest(unittest.TestCase):
+    def test_system_eigen_preserves_builtin_header_search_order(self):
+        flags = core_tests.eigen_include_flags(Path('/usr/include'))
+        self.assertNotIn('/usr/include', flags)
+        self.assertIn('/usr/include/eigen3', flags)
+        compiler = shutil.which('g++') or shutil.which('clang++')
+        if not compiler:
+            self.skipTest('C++ compiler unavailable')
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'standard_headers.cpp'
+            source.write_text('#include <cstdlib>\n#include <cmath>\n#include <string>\n'
+                              'int main() { return std::abs(-1)-1; }\n')
+            executable = str(Path(directory) / 'standard_headers.exe')
+            subprocess.check_call([compiler, '-std=c++14'] + flags +
+                                  [str(source), '-o', executable])
+            subprocess.check_call([executable])
+
+    def test_custom_eigen_root_still_supplies_both_include_styles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            flags = core_tests.eigen_include_flags(parent)
+            self.assertEqual(flags, ['-isystem', str(parent),
+                                     '-isystem', str(parent / 'eigen3')])
+
     def test_deployment_preserves_original_and_refuses_unexpected_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory); target = base / 'src'; source = ROOT / 'rf2o_laser_odometry'

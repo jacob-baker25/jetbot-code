@@ -9,11 +9,22 @@ import subprocess
 import tempfile
 
 
+def eigen_include_flags(eigen_parent):
+    # GCC's C++ wrappers use include_next to reach the C library. Explicitly
+    # promoting /usr/include with -isystem breaks that order on older GCC.
+    # It is already a compiler default; only custom Eigen roots need adding.
+    parent = Path(eigen_parent)
+    flags = []
+    if parent.resolve() != Path('/usr/include').resolve():
+        flags += ['-isystem', str(parent)]
+    return flags + ['-isystem', str(parent / 'eigen3')]
+
+
 def run(source, directory, eigen_parent=Path('/usr/include'), compiler='c++'):
     here = Path(__file__).resolve().parent
     executable = str(Path(directory) / 'rf2o_core_test')
-    subprocess.check_call([compiler, '-std=c++14', '-O1', '-Wall', '-Wextra',
-        '-isystem', str(eigen_parent), '-isystem', str(eigen_parent/'eigen3'),
+    subprocess.check_call([compiler, '-std=c++14', '-O1', '-Wall', '-Wextra'] +
+        eigen_include_flags(eigen_parent) + [
         '-I'+str(here/'rf2o_test_stubs'), '-I'+str(source/'include'),
         str(here/'test_rf2o_core.cpp'), str(source/'src/CLaserOdometry2D.cpp'),
         '-o', executable])
