@@ -5,6 +5,12 @@ demonstrate repeatable localization after restart. Next target: a short supervis
 autonomous goal on that map. Full-building navigation and production-grade
 recovery are outside this deadline. Demonstrate only what has actually passed.
 
+Latest action (2026-11-17): use LIDAR_BATCH_TRIAL.md for the next run. The direct
+RF2O repair passed timing but drifted while stationary; the subsequent IMU trial
+stopped on a measured lidar overflow/restart gap. Do not advance to the motion
+instructions below until acquisition and stationary accuracy are reviewed. The
+next candidate changes Python serial batching only and needs no C++ rebuild.
+
 2026-11-17 deployment correction: 067b2ea stopped in the standalone compiler
 test with `cstdlib: fatal error: stdlib.h: No such file or directory`. The test
 harness explicitly added `-isystem /usr/include`, disrupting GCC's include_next

@@ -33,6 +33,28 @@ def session_method(name, namespace):
 
 
 class HallwayTrialTest(unittest.TestCase):
+    def test_lidar_mode_marker_and_summary(self):
+        for mode, size in (('blocking', 5), ('batched', 200)):
+            self.assertEqual(runner.lidar_reader_command('python3 bridge.py', mode),
+                             'env JETBOT_LIDAR_READER='+mode+' python3 bridge.py')
+            marker = 'LIDAR_ACQUISITION version=1 mode={} batch_bytes={} max_buffer_bytes=3000'.format(mode,size)
+            runner.require_lidar_reader(marker+'\n', mode)
+            with self.assertRaises(RuntimeError): runner.require_lidar_reader('', mode)
+            with self.assertRaises(RuntimeError): runner.require_lidar_reader(marker.replace('3000','6000'), mode)
+            result = runner.parse_lidar_acquisition(marker+'\nLIDAR_TIMING_SUMMARY {"recovery_count":0}\n')
+            self.assertTrue(result['complete'])
+            self.assertEqual(result['summaries'][0]['recovery_count'], 0)
+        self.assertFalse(runner.parse_lidar_acquisition('LIDAR_TIMING_SUMMARY broken')['complete'])
+
+    def test_lidar_contract_failure_prevents_any_process_start(self):
+        with mock.patch.object(runner.subprocess, 'check_call',
+                side_effect=runner.subprocess.CalledProcessError(1,'driver contract')), \
+             mock.patch.object(runner.subprocess, 'Popen') as spawn, \
+             mock.patch.object(runner.tempfile, 'mkdtemp') as make_trial, \
+             mock.patch.object(sys, 'argv', ['trial','test','--lidar-reader','batched']):
+            with self.assertRaises(runner.subprocess.CalledProcessError): runner.main()
+            spawn.assert_not_called()
+            make_trial.assert_not_called()
     def test_estimate_policy_and_deadband_are_verified(self):
         base = 'ros2 run rf2o_laser_odometry rf2o_laser_odometry_node --ros-args -p publish_tf:=false'
         self.assertEqual(runner.rf2o_deadband_command(base, None), base)
@@ -181,7 +203,8 @@ class HallwayTrialTest(unittest.TestCase):
                 node = fake.MappingSession()
                 self.assertEqual(node.processes, [("observer", observer)])
                 self.assertEqual(fake.LOCAL_NODES, str(ram / "sources"))
-                self.assertEqual(node.start_process('lidar', 'unchanged'), ('lidar', 'unchanged'))
+                self.assertEqual(node.start_process('lidar', 'unchanged'),
+                                 ('lidar', 'env JETBOT_LIDAR_READER=blocking unchanged'))
                 self.assertEqual(node.start_process('rf2o', 'ros2 run example node'),
                     ('rf2o', 'ros2 run example node --ros-args --log-level warn'))
                 if failed:

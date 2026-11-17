@@ -2,6 +2,7 @@
 
 import time
 import json
+import os
 from collections import deque
 
 import rclpy
@@ -9,7 +10,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 
 from rplidar import RPLidarException
-from lidar_serial_reader import BoundedRPLidar
+from lidar_serial_reader import BoundedRPLidar, BatchedRPLidar
 
 from lidar_scan_geometry import (
     NUM_BINS,
@@ -36,11 +37,17 @@ class RPLidarBridge(Node):
             10
         )
 
-        self.lidar = BoundedRPLidar(
+        reader_mode = os.environ.get('JETBOT_LIDAR_READER', 'blocking')
+        if reader_mode not in ('blocking', 'batched'):
+            raise ValueError('Unknown lidar reader: '+reader_mode)
+        reader = BatchedRPLidar if reader_mode == 'batched' else BoundedRPLidar
+        self.lidar = reader(
             PORT,
             baudrate=BAUDRATE,
             timeout=2
         )
+        print('LIDAR_ACQUISITION version=1 mode={} batch_bytes={} max_buffer_bytes=3000'.format(
+            reader_mode, 200 if reader_mode == 'batched' else 5), flush=True)
 
         self.recover_lidar_state()
 

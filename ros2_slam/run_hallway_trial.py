@@ -74,6 +74,9 @@ def summarize(root, analysis_path):
     if rf2o_log.exists():
         report['rf2o_diagnostics'] = parse_rf2o_timing(rf2o_log.read_text(errors='replace'))
         report['rf2o_validity'] = parse_rf2o_validity(rf2o_log.read_text(errors='replace'))
+    lidar_log = results[0].parent / 'lidar.log'
+    if lidar_log.exists():
+        report['lidar_acquisition'] = parse_lidar_acquisition(lidar_log.read_text(errors='replace'))
     report["checkpoint_heading_changes"] = module.checkpoint_deltas(result)
     report["streams"] = {}
     checkpoints = result.get("checkpoints", [])
@@ -142,6 +145,33 @@ def parse_rf2o_validity(log):
                 parse_errors=errors, complete=len(markers)==1 and len(summaries)==1 and not errors)
 
 
+def parse_lidar_acquisition(log):
+    markers, summaries, errors = [], [], []
+    for line in log.splitlines():
+        if line.startswith('LIDAR_ACQUISITION '):
+            markers.append(line)
+        if line.startswith('LIDAR_TIMING_SUMMARY '):
+            try:
+                summaries.append(json.loads(line.split(' ', 1)[1]))
+            except ValueError as exc:
+                errors.append(str(exc))
+    return dict(markers=markers, summaries=summaries, parse_errors=errors,
+                complete=len(markers)==1 and len(summaries)==1 and not errors)
+
+
+def lidar_reader_command(command, mode):
+    if mode not in ('blocking', 'batched'):
+        raise ValueError('Unknown lidar reader')
+    return 'env JETBOT_LIDAR_READER='+mode+' '+command
+
+
+def require_lidar_reader(log, mode):
+    size = 200 if mode == 'batched' else 5
+    expected = 'LIDAR_ACQUISITION version=1 mode={} batch_bytes={} max_buffer_bytes=3000'.format(mode, size)
+    if expected not in log.splitlines():
+        raise RuntimeError('Lidar acquisition marker missing/mismatched')
+
+
 def rf2o_deadband_command(command, mode):
     if mode is None:
         return command
@@ -191,11 +221,16 @@ def main():
                         help="RF2O process only; warn suppresses routine per-scan INFO")
     parser.add_argument('--rf2o-deadband', choices=('legacy','off'), default=None,
                         help='Requires candidate estimate-policy marker; default leaves binary setting unchanged')
+    parser.add_argument('--lidar-reader', choices=('blocking', 'batched'), default='blocking',
+                        help='Batched normal packets reduce serial calls; blocking retains prior reader')
     args = parser.parse_args()
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,70}$", args.name):
         parser.error("Use a short name containing letters, digits, underscores or hyphens")
-    check_rcl_logging(args.rf2o_log_level)
     package = Path(__file__).resolve().parent
+    if args.lidar_reader == 'batched':
+        subprocess.check_call([sys.executable, str(package/'local_nodes/lidar_serial_reader.py'),
+                               '--check-batched-driver'], timeout=20)
+    check_rcl_logging(args.rf2o_log_level)
     output = Path.home() / "autochair_ros2_ws" / "experiments"
     output.mkdir(parents=True, exist_ok=True)
     target = output / (args.name + "_bundle.tar.gz")
@@ -210,6 +245,7 @@ def main():
                 "rf2o_log_level": args.rf2o_log_level,
                 "rf2o_log_scope": "process_default",
                 "rf2o_deadband": args.rf2o_deadband,
+                "lidar_reader": args.lidar_reader,
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
                 "installed_local_nodes_modified": False, "status": "starting"}
@@ -245,6 +281,10 @@ def main():
 
         class TrialSession(base):
             def start_process(self, name, command):
+                if name == 'lidar':
+                    command = lidar_reader_command(command, args.lidar_reader)
+                    manifest['lidar_command'] = command
+                    write_json(root / 'trial_manifest.json', manifest)
                 if name == 'rf2o':
                     command = rf2o_logging_command(command, args.rf2o_log_level)
                     command = rf2o_deadband_command(command, args.rf2o_deadband)
@@ -255,6 +295,8 @@ def main():
             def verify_odom_source(self):
                 if not super(TrialSession, self).verify_odom_source():
                     return False
+                require_lidar_reader(Path(self.process_log_paths['lidar']).read_text(), args.lidar_reader)
+                print('Lidar acquisition policy: PASS; mode='+args.lidar_reader, flush=True)
                 if args.rf2o_deadband is not None:
                     require_estimate_policy(Path(self.process_log_paths['rf2o']).read_text(),
                                             args.rf2o_deadband)
@@ -294,7 +336,7 @@ def main():
             report = summarize(root, package / "analysis" / "check_session_timing.py")
             write_json(root / "timing_report.json", report)
             print("Recorded timing: {}".format("PASS" if report["passed"] else "FAIL"))
-            print("Transport check for supervised turns: {}".format(
+            print("Stream freshness: {} (pose/map accuracy still requires review)".format(
                 "PASS" if report.get("transport_ready_for_supervised_turns") else "NOT YET"))
         except Exception as exc:
             manifest["analysis_error"] = repr(exc)
