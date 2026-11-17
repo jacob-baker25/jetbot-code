@@ -161,7 +161,7 @@ def execute(command, log, timeout=600):
 def compare(bundle, output, compiler, eigen_parent):
     here = Path(__file__).resolve().parent
     core = here.parent/'rf2o_laser_odometry'
-    source = (core/'src/CLaserOdometry2D.cpp').read_text()
+    source = (here/'fixtures/rf2o_coarse_baseline.cpp').read_text()
     candidate = make_candidate(source)
     pairs = load_pairs(bundle)
     report = {'status': 'running', 'hardware_started': False, 'installed_files_modified': False,

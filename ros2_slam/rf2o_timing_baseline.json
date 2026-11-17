@@ -2,9 +2,13 @@
   "src/CLaserOdometry2DNode.cpp": [
     "e611db8bce3db1a2690fd140638da7bbde1a06e03a661a111e2e46a2ba02a17a",
     "9da90f14ca8967e924ce363481db2721d5702dd03a958bfffae278a617bc60ea",
-    "ec4401d1a3b79a4defdd050705ec8e96a71d1bbeafed34a29ff61550b2b4c673"
+    "ec4401d1a3b79a4defdd050705ec8e96a71d1bbeafed34a29ff61550b2b4c673",
+    "74e6dbfc71d0c8015569d9f4d865db7edcf22183779cdf3f71701b17b97620d5"
   ],
-  "src/CLaserOdometry2D.cpp": "7db8ae8ea8fdf5c49550fa7dd774acdecfd8b7d0a9fd031fc7484ed19b008bed",
+  "src/CLaserOdometry2D.cpp": [
+    "7db8ae8ea8fdf5c49550fa7dd774acdecfd8b7d0a9fd031fc7484ed19b008bed",
+    "76088dbfb002a26585e5f83b3eaba62257d909785d2d32dcd18e7fb3047c4af4"
+  ],
   "include/rf2o_laser_odometry/CLaserOdometry2DNode.hpp": [
     "55d15116dc685bd934f11247c0eacd22475ae0e9627c80a71b9dcfb2aef73a9b",
     "2c50e0a6e8e09e1f6415e156874e8bec0af3e3fbbebdb724b57b237df8c06a97"

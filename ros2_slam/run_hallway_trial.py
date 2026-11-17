@@ -182,6 +182,12 @@ def rf2o_deadband_command(command, mode):
     return command + ' -p suppress_small_motion:=' + ('false' if mode=='off' else 'true')
 
 
+def require_pyramid_policy(log):
+    expected = 'RF2O_PYRAMID_POLICY version=1 skip_rank_deficient_coarse=true require_finest=true'
+    if expected not in log.splitlines():
+        raise RuntimeError('RF2O pyramid-policy marker missing; deploy and rebuild RF2O')
+
+
 def require_estimate_policy(log, mode):
     expected = 'RF2O_ESTIMATE_POLICY version=1 reference_max_s=0.35 deadband='+mode
     if expected not in log.splitlines():
@@ -295,6 +301,7 @@ def main():
             def verify_odom_source(self):
                 if not super(TrialSession, self).verify_odom_source():
                     return False
+                require_pyramid_policy(Path(self.process_log_paths['rf2o']).read_text())
                 require_lidar_reader(Path(self.process_log_paths['lidar']).read_text(), args.lidar_reader)
                 print('Lidar acquisition policy: PASS; mode='+args.lidar_reader, flush=True)
                 if args.rf2o_deadband is not None:

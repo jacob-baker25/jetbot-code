@@ -238,6 +238,7 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& sc
     return rejectEstimate(reason, true);
   };
   unsigned int solved_levels = 0;
+  bool finest_solved = false;
   // Scratch transforms never survive a rejected attempt.
   for (auto &transform : transformations) transform.setIdentity();
 
@@ -290,12 +291,22 @@ bool CLaserOdometry2D::odometryCalculation(const sensor_msgs::msg::LaserScan& sc
     // 6. Compute weights
     computeWeights();
 
-    if (!solveSystemNonLinear()) return reject(failure_reason);
+    if (!solveSystemNonLinear()) {
+      // Experimental offline candidate: never solve an unobservable system.
+      // Leave this level's identity transform and try the finer scan instead.
+      if (std::string(failure_reason) == "rank_deficient_system" && i+1 < ctf_levels) {
+        failure_reason = "none";
+        continue;
+      }
+      return reject(failure_reason);
+    }
     if (!filterLevelSolution()) return reject(failure_reason);
     ++solved_levels;
+    if (image_level == 0) finest_solved = true;
   } // end pyramid lvls
 
   if (!solved_levels) return reject("insufficient_returns");
+  if (!finest_solved) return reject("finest_level_unsolved");
   for (const auto &transform : transformations)
     if (!transform.allFinite()) return reject("nonfinite_transform");
 

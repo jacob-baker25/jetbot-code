@@ -27,7 +27,7 @@ class RF2OTimingTest(unittest.TestCase):
     def test_system_eigen_preserves_builtin_header_search_order(self):
         flags = core_tests.eigen_include_flags(Path('/usr/include'))
         self.assertNotIn('/usr/include', flags)
-        self.assertIn('/usr/include/eigen3', flags)
+        self.assertIn(str(Path('/usr/include')/'eigen3'), flags)
         compiler = shutil.which('g++') or shutil.which('clang++')
         if not compiler:
             self.skipTest('C++ compiler unavailable')

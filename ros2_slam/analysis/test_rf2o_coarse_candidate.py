@@ -56,7 +56,7 @@ class OfflineComparisonTests(unittest.TestCase):
         with self.assertRaises(ValueError): check.make_candidate('unrelated source')
 
     def test_only_generates_candidate_from_current_core(self):
-        path=Path(__file__).resolve().parents[1]/'rf2o_laser_odometry/src/CLaserOdometry2D.cpp'
+        path=Path(__file__).resolve().parent/'fixtures/rf2o_coarse_baseline.cpp'
         before=path.read_bytes(); source=path.read_text()
         result=check.make_candidate(source)
         self.assertNotEqual(result, source)
@@ -79,6 +79,21 @@ class OfflineComparisonTests(unittest.TestCase):
 
     def test_python36_syntax(self):
         ast.parse(Path(check.__file__).read_text(), feature_version=(3,6))
+
+    def test_integrated_core_matches_verified_candidate(self):
+        here=Path(__file__).resolve().parent
+        baseline=(here/'fixtures/rf2o_coarse_baseline.cpp').read_text()
+        integrated=(here.parent/'rf2o_laser_odometry/src/CLaserOdometry2D.cpp').read_text()
+        self.assertEqual(integrated, check.make_candidate(baseline))
+
+    def test_runtime_marker_rejects_old_binary(self):
+        import importlib.util
+        path=Path(__file__).resolve().parents[1]/'run_hallway_trial.py'
+        spec=importlib.util.spec_from_file_location('pyramid_runner', str(path))
+        runner=importlib.util.module_from_spec(spec); spec.loader.exec_module(runner)
+        with self.assertRaises(RuntimeError):
+            runner.require_pyramid_policy('RF2O_TIMING_ENABLED version=1')
+        runner.require_pyramid_policy('RF2O_PYRAMID_POLICY version=1 skip_rank_deficient_coarse=true require_finest=true\n')
 
 
 if __name__ == '__main__':

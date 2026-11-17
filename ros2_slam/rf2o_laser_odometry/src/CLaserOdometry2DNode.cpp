@@ -47,6 +47,7 @@ CLaserOdometry2DNode::CLaserOdometry2DNode(): Node("CLaserOdometry2DNode")
   this->get_parameter("suppress_small_motion", rf2o_ref.suppress_small_motion);
   std::cerr << "RF2O_ESTIMATE_POLICY version=1 reference_max_s=0.35 deadband="
             << (rf2o_ref.suppress_small_motion ? "legacy" : "off") << std::endl;
+  std::cerr << "RF2O_PYRAMID_POLICY version=1 skip_rank_deficient_coarse=true require_finest=true" << std::endl;
   if (timing.enabled) {
     std::cerr << "RF2O_TIMING_ENABLED version=1 rmw="
               << rmw_get_implementation_identifier() << std::endl;

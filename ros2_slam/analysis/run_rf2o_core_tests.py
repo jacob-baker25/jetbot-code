@@ -4,6 +4,7 @@
 Python 3.6; no ROS installation needed. This does not replace a full ROS build.
 """
 import argparse
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -29,7 +30,33 @@ def run(source, directory, eigen_parent=Path('/usr/include'), compiler='c++'):
         str(here/'test_rf2o_core.cpp'), str(source/'src/CLaserOdometry2D.cpp'),
         '-o', executable])
     subprocess.check_call([executable])
+    check_saved_pairs(source, directory, eigen_parent, compiler)
     check_process(source, directory, compiler)
+
+
+def check_saved_pairs(source, directory, eigen_parent, compiler):
+    from check_rf2o_coarse_candidate import HARNESS, pair_text
+    here = Path(__file__).resolve().parent
+    pairs = json.loads((here/'fixtures/rf2o_coarse_pairs.json').read_text())
+    fixture = Path(directory)/'recorded_pairs.cpp'
+    fixture.write_text(HARNESS)
+    executable = str(Path(directory)/'recorded_pairs')
+    subprocess.check_call([compiler, '-std=c++14', '-O1'] +
+        eigen_include_flags(eigen_parent) + ['-I'+str(here/'rf2o_test_stubs'),
+        '-I'+str(source/'include'), str(fixture),
+        str(source/'src/CLaserOdometry2D.cpp'), '-o', executable])
+    inputs = []
+    for i, pair in enumerate(pairs):
+        path = Path(directory)/('pair_'+str(i)+'.txt')
+        path.write_text(pair_text(pair['input'])); inputs.append(str(path))
+    output = subprocess.check_output([executable]+inputs, universal_newlines=True)
+    rows = [json.loads(line) for line in output.splitlines() if line.startswith('{')]
+    if len(rows) != 6 or any(not r['accepted'] or r['reason'] != 'none' or
+                            r['level'] != 4 or r['columns'] != 360 or
+                            not 0 <= r['translation_m'] < .01 or
+                            not abs(r['yaw_rad']) < .01 for r in rows):
+        raise RuntimeError('Saved coarse-rejection pair regression failed: '+output)
+    print('RF2O_SAVED_PAIRS_PASS 6/6 finest-level solves; bounded stationary increments')
 
 
 def check_process(source, directory, compiler='c++'):
