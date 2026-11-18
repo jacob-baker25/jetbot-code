@@ -63,9 +63,10 @@ This keeps the existing deployment checkout and teammate branch untouched.
 (
 set -e
 cd ~/jetbot-code-f03243c
-git fetch origin
+git fetch origin refs/heads/analysis/stationary-sequence-replay:refs/remotes/origin/analysis/stationary-sequence-replay
+git cat-file -e e3445af384f07b3048ac71c0d7ed07b419081c82^{commit}
 test ! -e "$HOME/jetbot-input-review"
-git worktree add --detach "$HOME/jetbot-input-review" origin/analysis/stationary-sequence-replay
+git worktree add --detach "$HOME/jetbot-input-review" e3445af384f07b3048ac71c0d7ed07b419081c82
 cd ~/jetbot-input-review
 git log -1 --oneline
 python3 -m unittest discover -s ros2_slam/analysis -p test_lidar_input_capture.py
@@ -74,6 +75,18 @@ python3 -m unittest discover -s ros2_slam/analysis -p test_lidar_input_capture.p
 
 If the folder already exists, stop and inspect it; do not delete or reset it.
 No deployment script, apt install or C++ build is required for this capture.
+
+Handoff correction: the user's first attempt stopped at `fatal: invalid reference:
+e3445af`. The recorder test and capture did not run. This Jetson repository was
+originally a shallow single-branch clone, so a plain `git fetch origin` can omit
+the new branch. The explicit source/destination refspec above fetches that branch
+without changing the configured fetch rules or current checkout. The exact cause
+has not been rechecked with `git config --get-all remote.origin.fetch` on the
+Jetson, but the explicit fetch addresses the missing local reference directly.
+If it still fails, collect `git remote -v`, `git config --get-all
+remote.origin.fetch`, the full fetch output, and `git worktree list`; do not reset,
+reclone, rebuild or delete directories. The published recorder code remains the
+pinned e3445af commit; later documentation-only commits do not require redeployment.
 
 ## One stationary run (also suitable while remote)
 
