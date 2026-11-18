@@ -119,7 +119,12 @@ class LidarReaderTest(unittest.TestCase):
 
     def test_python36_syntax(self):
         for name in ('lidar_serial_reader.py', 'rplidar_python_bridge.py'):
-            ast.parse((ROOT / name).read_text(), feature_version=(3, 6))
+            path = ROOT / name
+            source = path.read_text()
+            try:
+                ast.parse(source, feature_version=(3, 6))
+            except TypeError:
+                compile(source, str(path), 'exec')
 
 
 class BatchedReaderTest(unittest.TestCase):

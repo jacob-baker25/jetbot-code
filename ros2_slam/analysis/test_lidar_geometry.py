@@ -69,7 +69,11 @@ class LidarGeometryTest(unittest.TestCase):
 
     def test_python36_syntax(self):
         for path in (HELPER, ROOT / "local_nodes" / "rplidar_python_bridge.py"):
-            ast.parse(path.read_text(encoding="utf-8"), feature_version=(3, 6))
+            source = path.read_text(encoding="utf-8")
+            try:
+                ast.parse(source, feature_version=(3, 6))
+            except TypeError:
+                compile(source, str(path), "exec")
 
     def test_deployment_copies_files_and_preserves_bridge(self):
         bash = ("C:/Program Files/Git/bin/bash.exe" if os.name == "nt"
