@@ -149,6 +149,30 @@ class HallwayTrialTest(unittest.TestCase):
         check = session_method("require_motion_data", {})
         with self.assertRaisesRegex(RuntimeError, "disabled"): check(node)
 
+    def test_turn_speed_adjustment_stops_and_is_bounded(self):
+        stopped = []
+        node = types.SimpleNamespace(
+            turn_speed=.18,
+            turn_speed_changes=[],
+            stop_robot=lambda: stopped.append(True),
+        )
+        adjust = session_method("adjust_turn_speed", dict(
+            MIN_TURN_SPEED=.08,
+            MAX_TURN_SPEED=.30,
+            time=types.SimpleNamespace(time=lambda: 123.),
+        ))
+        adjust(node, -.02)
+        self.assertEqual(node.turn_speed, .16)
+        self.assertEqual(node.turn_speed_changes[-1], {
+            "time_unix": 123., "turn_speed": .16})
+        for unused in range(10):
+            adjust(node, -.02)
+        self.assertEqual(node.turn_speed, .08)
+        for unused in range(20):
+            adjust(node, .02)
+        self.assertEqual(node.turn_speed, .30)
+        self.assertEqual(len(stopped), 31)
+
     def test_stale_during_motion_stops_and_restores_terminal(self):
         stopped, restored = [], []
         def reject(): raise RuntimeError('MOTION_DATA_STALE scan')
@@ -210,10 +234,13 @@ class HallwayTrialTest(unittest.TestCase):
                 def __init__(self, *args): self.processes=[]; self.process_log_paths={}
                 def start_process(self, name, command):
                     return name, command
+                def stop_stack(self):
+                    self.stopped_processes = list(self.processes)
             fake = types.SimpleNamespace(MappingSession=Session)
             def fail():
                 node = fake.MappingSession()
                 self.assertEqual(node.processes, [("observer", observer)])
+                self.assertEqual(node.turn_speed, .12)
                 self.assertEqual(fake.LOCAL_NODES, str(ram / "sources"))
                 self.assertEqual(node.start_process('lidar', 'unchanged'),
                                  ('lidar', runner.lidar_input_command(
@@ -222,6 +249,9 @@ class HallwayTrialTest(unittest.TestCase):
                                      0,ram/'lidar_input.jsonl')))
                 self.assertEqual(node.start_process('rf2o', 'ros2 run example node'),
                     ('rf2o', 'ros2 run example node --ros-args --log-level warn'))
+                node.stop_stack()
+                self.assertEqual(node.stopped_processes, [])
+                self.assertIsNone(observer.returncode)
                 if failed:
                     raise RuntimeError('simulated process failure')
                 raise SystemExit(0)
@@ -238,7 +268,8 @@ class HallwayTrialTest(unittest.TestCase):
                      mock.patch.object(runner, 'summarize', return_value={'passed':False}), \
                      mock.patch.dict(sys.modules, {'mapping_session':fake}), \
                      mock.patch.dict(os.environ, {}, clear=False), \
-                     mock.patch.object(sys, 'argv', ['trial', 'test_failure', '--rf2o-log-level', 'warn']):
+                     mock.patch.object(sys, 'argv', ['trial', 'test_failure',
+                         '--rf2o-log-level', 'warn', '--turn-speed', '.12']):
                     self.assertEqual(runner.main(), 1 if failed else 0)
             finally:
                 sys.path[:] = old_path
@@ -250,6 +281,8 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertEqual(manifest['rf2o_log_level'], 'warn')
             self.assertEqual(manifest['lidar_input_scans'],0)
             self.assertEqual(manifest['lidar_resampling'],'legacy')
+            self.assertEqual(manifest['initial_turn_speed'],.12)
+            self.assertGreater(manifest['observer_saved_bytes'],0)
             self.assertTrue(manifest['rf2o_command'].endswith('--log-level warn'))
             self.assertEqual(manifest['rf2o_log_scope'], 'process_default')
             if failed:
@@ -258,7 +291,13 @@ class HallwayTrialTest(unittest.TestCase):
     def test_python36_syntax(self):
         for path in [ROOT / 'run_hallway_trial.py', ROOT / 'local_nodes/motion_freshness.py',
                      ROOT / 'local_nodes/mapping_session.py', ROOT / 'local_nodes/observe_imu_timing.py']:
-            ast.parse(path.read_text(encoding='utf8'), feature_version=(3, 6))
+            source = path.read_text(encoding='utf8')
+            if sys.version_info >= (3, 8):
+                ast.parse(source, feature_version=(3, 6))
+            else:
+                # Running this test on Python 3.6 is itself the syntax check;
+                # feature_version was added to ast.parse in later Python.
+                compile(source, str(path), 'exec')
 
     def test_percentile_pass_does_not_hide_runtime_gap_from_transport_check(self):
         import csv

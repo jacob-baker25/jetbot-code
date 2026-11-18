@@ -79,6 +79,12 @@ BIAS_R = 1.0
 DRIVE_SPEED = 0.25
 TURN_SPEED = 0.18
 
+MIN_TURN_SPEED = 0.08
+
+MAX_TURN_SPEED = 0.30
+
+TURN_SPEED_STEP = 0.02
+
 WATCHDOG_SECONDS = 0.15
 
 
@@ -266,6 +272,8 @@ class MappingSession(Node):
 
         self.speed = DRIVE_SPEED
         self.turn_speed = TURN_SPEED
+
+        self.turn_speed_changes = []
 
         self.moving = False
         self.last_motor_command = 0.0
@@ -1864,6 +1872,36 @@ class MappingSession(Node):
         )
 
 
+    def adjust_turn_speed(self, delta):
+
+        # Never change a live motor command underneath the operator.
+        self.stop_robot()
+
+        self.turn_speed = round(
+            min(
+                MAX_TURN_SPEED,
+                max(
+                    MIN_TURN_SPEED,
+                    self.turn_speed + delta
+                )
+            ),
+            2
+        )
+
+        self.turn_speed_changes.append({
+            "time_unix": time.time(),
+            "turn_speed": self.turn_speed,
+        })
+
+        print(
+            "\rTurn speed: {:.2f}     ".format(
+                self.turn_speed
+            ),
+            end="",
+            flush=True
+        )
+
+
     def stop_robot(self):
 
         try:
@@ -2439,6 +2477,10 @@ class MappingSession(Node):
                     self.turn_speed
                 ),
 
+                "turn_speed_changes": list(
+                    self.turn_speed_changes
+                ),
+
                 "watchdog_seconds": (
                     WATCHDOG_SECONDS
                 ),
@@ -2697,6 +2739,14 @@ class MappingSession(Node):
             "  -      decrease drive speed"
         )
 
+        print(
+            "  [      decrease turn speed by 0.02"
+        )
+
+        print(
+            "  ]      increase turn speed by 0.02"
+        )
+
         print()
         print("Finish:")
         print(
@@ -2888,6 +2938,18 @@ class MappingSession(Node):
                         self.speed = max(
                             0.15,
                             self.speed - 0.05
+                        )
+
+                    elif key == "[":
+
+                        self.adjust_turn_speed(
+                            -TURN_SPEED_STEP
+                        )
+
+                    elif key == "]":
+
+                        self.adjust_turn_speed(
+                            TURN_SPEED_STEP
                         )
 
                     elif key == "q":

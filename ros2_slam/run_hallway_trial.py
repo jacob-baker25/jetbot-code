@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -259,9 +260,13 @@ def main():
                         help='Cartesian mode uses bounded same-scan fractional-angle chords')
     parser.add_argument('--lidar-input-scans', type=int, default=0,
                         help='Capture up to 1200 pre-binning scans in RAM; default disabled')
+    parser.add_argument('--turn-speed', type=float, default=0.18,
+                        help='Initial in-place turn motor command, 0.08..0.30; [ and ] adjust it live')
     args = parser.parse_args()
     if not 0<=args.lidar_input_scans<=1200:
         parser.error('--lidar-input-scans must be 0..1200')
+    if not math.isfinite(args.turn_speed) or not 0.08 <= args.turn_speed <= 0.30:
+        parser.error('--turn-speed must be finite and within 0.08..0.30')
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,70}$", args.name):
         parser.error("Use a short name containing letters, digits, underscores or hyphens")
     package = Path(__file__).resolve().parent
@@ -286,6 +291,7 @@ def main():
                 "lidar_reader": args.lidar_reader,
                 "lidar_resampling": args.lidar_resampling,
                 "lidar_input_scans": args.lidar_input_scans,
+                "initial_turn_speed": args.turn_speed,
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
                 "installed_local_nodes_modified": False, "status": "starting"}
@@ -352,9 +358,20 @@ def main():
 
             def __init__(self, *values):
                 super(TrialSession, self).__init__(*values)
+                self.turn_speed = args.turn_speed
                 # Observer termination (including its 10-minute cap) aborts the trial.
                 self.processes.append(("observer", observer))
                 self.process_log_paths["observer"] = str(root / "observer.log")
+
+            def stop_stack(self):
+                # Keep the observer monitored during the trial, but leave its
+                # graceful SIGINT/save to the launcher after the ROS stack is
+                # down. MappingSession previously stopped it first, so the
+                # launcher's finally block could not verify/save its RAM data.
+                self.processes[:] = [
+                    pair for pair in self.processes if pair[1] is not observer
+                ]
+                return super(TrialSession, self).stop_stack()
 
         session.MappingSession = TrialSession
         sys.argv = ["mapping_session.py", args.name, "euclidean_heading", "narrow", args.odom]
@@ -377,6 +394,12 @@ def main():
                 observer.wait(timeout=5)
                 manifest["observer_forced_stop"] = True
         observer_log.close()
+        if observer is not None:
+            manifest["observer_returncode"] = observer.poll()
+        manifest["observer_saved_bytes"] = (
+            (root / "observer.jsonl").stat().st_size
+            if (root / "observer.jsonl").exists() else 0
+        )
         manifest.update(exit_code=exit_code, end_unix=time.time(),
                         status="complete" if exit_code == 0 else "failed")
         try:

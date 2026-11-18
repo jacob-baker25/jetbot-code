@@ -89,7 +89,10 @@ not accumulate more stationary runs without a specific unresolved question.
 
 1. **Measured turn pair.** Tape perpendicular reference lines; align a visible
    robot heading reference (record alignment uncertainty, aim <=2 degrees).
-   Run `python3 ros2_slam/run_hallway_trial.py hallway_turns_01 --phase turns`.
+   Run `python3 ros2_slam/run_hallway_trial.py hallway_turns_01 --phase turns
+   --turn-speed 0.12`. `[` and `]` lower or raise turn speed by 0.02 while
+   stopped; use the lowest setting that moves reliably. The exact endpoint need
+   not be 90 degrees if its signed physical angle is measured and recorded.
    Turn left 90 degrees as viewed from above, SPACE, wait 5s, L. Turn right to
    the starting line, SPACE, wait 5s, L, then Q. Record physical angle and any
    translation at each checkpoint. Repeat opposite direction if the first is
@@ -120,6 +123,10 @@ Use start-relative coordinates (forward x, left y, CCW positive). No invented
 ground truth from an estimator. Compare one raw-RF2O baseline route (`--odom rf2o`)
 with the IMU candidate only after both are valid; repeat if differences are near
 measurement uncertainty. Choose the simpler configuration if IMU adds no benefit.
+
+The launcher owns passive-observer shutdown and must save a nonempty
+`observer.jsonl` before timing analysis. An empty capture makes the timing result
+invalid even when RF2O and lidar internal summaries appear healthy.
 
 ## Map use and autonomous traversal
 
