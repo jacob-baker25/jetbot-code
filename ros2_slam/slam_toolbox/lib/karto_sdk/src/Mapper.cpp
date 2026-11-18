@@ -34,6 +34,7 @@
 #include <string>
 
 #include "karto_sdk/Mapper.h"
+#include "karto_sdk/SequentialMatchGuard.h"
 
 BOOST_CLASS_EXPORT(karto::MapperGraph);
 BOOST_CLASS_EXPORT(karto::Graph<karto::LocalizedRangeScan>);
@@ -2008,7 +2009,9 @@ Mapper::Mapper()
   m_pSequentialScanMatcher(NULL),
   m_pMapperSensorManager(NULL),
   m_pGraph(NULL),
-  m_pScanOptimizer(NULL)
+  m_pScanOptimizer(NULL),
+  m_SequentialMatchAcceptedCount(0),
+  m_SequentialMatchRejectedCount(0)
 {
   InitializeParameters();
 }
@@ -2022,7 +2025,9 @@ Mapper::Mapper(const std::string & rName)
   m_pSequentialScanMatcher(NULL),
   m_pMapperSensorManager(NULL),
   m_pGraph(NULL),
-  m_pScanOptimizer(NULL)
+  m_pScanOptimizer(NULL),
+  m_SequentialMatchAcceptedCount(0),
+  m_SequentialMatchRejectedCount(0)
 {
   InitializeParameters();
 }
@@ -2243,6 +2248,21 @@ void Mapper::InitializeParameters()
     "Whether to increase the search space if no good matches are initially "
     "found.",
     false, GetParameterManager());
+
+  m_pSequentialMatchMinimumResponse = new Parameter<kt_double>(
+    "SequentialMatchMinimumResponse",
+    "Reject a sequential match below this response. Zero disables this check.",
+    0.0, GetParameterManager());
+
+  m_pSequentialMatchMaximumTranslation = new Parameter<kt_double>(
+    "SequentialMatchMaximumTranslation",
+    "Reject a sequential correction larger than this distance. Zero disables this check.",
+    0.0, GetParameterManager());
+
+  m_pSequentialMatchMaximumRotation = new Parameter<kt_double>(
+    "SequentialMatchMaximumRotation",
+    "Reject a sequential correction larger than this angle. Zero disables this check.",
+    0.0, GetParameterManager());
 }
 /* Adding in getters and setters here for easy parameter access */
 
@@ -2399,6 +2419,21 @@ bool Mapper::getParamUseResponseExpansion()
   return static_cast<bool>(m_pUseResponseExpansion->GetValue());
 }
 
+double Mapper::getParamSequentialMatchMinimumResponse()
+{
+  return static_cast<double>(m_pSequentialMatchMinimumResponse->GetValue());
+}
+
+double Mapper::getParamSequentialMatchMaximumTranslation()
+{
+  return static_cast<double>(m_pSequentialMatchMaximumTranslation->GetValue());
+}
+
+double Mapper::getParamSequentialMatchMaximumRotation()
+{
+  return static_cast<double>(m_pSequentialMatchMaximumRotation->GetValue());
+}
+
 /* Setters for parameters */
 // General Parameters
 void Mapper::setParamUseScanMatching(bool b)
@@ -2551,6 +2586,21 @@ void Mapper::setParamUseResponseExpansion(bool b)
   m_pUseResponseExpansion->SetValue((kt_bool)b);
 }
 
+void Mapper::setParamSequentialMatchMinimumResponse(double d)
+{
+  m_pSequentialMatchMinimumResponse->SetValue((kt_double)d);
+}
+
+void Mapper::setParamSequentialMatchMaximumTranslation(double d)
+{
+  m_pSequentialMatchMaximumTranslation->SetValue((kt_double)d);
+}
+
+void Mapper::setParamSequentialMatchMaximumRotation(double d)
+{
+  m_pSequentialMatchMaximumRotation->SetValue((kt_double)d);
+}
+
 
 void Mapper::Initialize(kt_double rangeThreshold)
 {
@@ -2603,6 +2653,8 @@ void Mapper::Reset()
     m_pMapperSensorManager = NULL;
   }
   m_Initialized = false;
+  m_SequentialMatchAcceptedCount = 0;
+  m_SequentialMatchRejectedCount = 0;
   while (!m_LocalizationScanVertices.empty()) {
     m_LocalizationScanVertices.pop();
   }
@@ -2669,7 +2721,34 @@ kt_bool Mapper::Process(LocalizedRangeScan * pScan)
                 << covariance(1, 1) << ","
                 << covariance(2, 2) << ")"
                 << std::endl;
-      pScan->SetSensorPose(bestPose);
+      const SequentialMatchGuardConfig guardConfig = {
+        m_pSequentialMatchMinimumResponse->GetValue(),
+        m_pSequentialMatchMaximumTranslation->GetValue(),
+        m_pSequentialMatchMaximumRotation->GetValue()};
+      const SequentialMatchDecision decision = EvaluateSequentialMatch(
+        guardConfig, response,
+        searchCenter.GetX(), searchCenter.GetY(), searchCenter.GetHeading(),
+        bestPose.GetX(), bestPose.GetY(), bestPose.GetHeading());
+      if (decision.accepted) {
+        pScan->SetSensorPose(bestPose);
+        m_SequentialMatchAcceptedCount++;
+      } else {
+        // The match covariance describes the rejected pose. Do not attach it
+        // to the odometry fallback edge as if that association were valid.
+        covariance.SetToIdentity();
+        m_SequentialMatchRejectedCount++;
+      }
+      if (decision.enabled) {
+        std::cout << "KARTO_SEQ_DECISION"
+                  << " accepted=" << (decision.accepted ? 1 : 0)
+                  << " reason=" << SequentialMatchDecisionReasonName(decision.reason)
+                  << " response=" << response
+                  << " translation_correction=" << decision.translation_correction
+                  << " rotation_correction=" << decision.rotation_correction
+                  << " accepted_count=" << m_SequentialMatchAcceptedCount
+                  << " rejected_count=" << m_SequentialMatchRejectedCount
+                  << std::endl;
+      }
     }
 
     // add scan to buffer and assign id

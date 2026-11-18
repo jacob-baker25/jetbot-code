@@ -80,3 +80,7 @@ slam_toolbox:
     # Preserve that effective value to isolate the search-width experiment.
     minimum_distance_penalty: 0.05
     use_response_expansion: true
+    # Runtime guard disabled in the baseline profile.
+    sequential_match_minimum_response: 0.0
+    sequential_match_maximum_translation: 0.0
+    sequential_match_maximum_rotation: 0.0

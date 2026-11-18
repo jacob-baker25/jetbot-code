@@ -79,6 +79,10 @@ def summarize(root, analysis_path):
     lidar_log = results[0].parent / 'lidar.log'
     if lidar_log.exists():
         report['lidar_acquisition'] = parse_lidar_acquisition(lidar_log.read_text(errors='replace'))
+    slam_log = results[0].parent / 'slam.log'
+    if slam_log.exists():
+        report['karto_sequential_guard'] = parse_karto_decisions(
+            slam_log.read_text(errors='replace'))
     report["checkpoint_heading_changes"] = module.checkpoint_deltas(result)
     report["streams"] = {}
     checkpoints = result.get("checkpoints", [])
@@ -159,6 +163,54 @@ def parse_lidar_acquisition(log):
                 errors.append(str(exc))
     return dict(markers=markers, summaries=summaries, parse_errors=errors,
                 complete=len(markers)==1 and len(summaries)==1 and not errors)
+
+
+def parse_karto_decisions(log):
+    rows = []
+    errors = []
+    for line in log.splitlines():
+        if 'KARTO_SEQ_DECISION ' not in line:
+            continue
+        fields = dict(re.findall(r'(\w+)=([^ ]+)', line.split('KARTO_SEQ_DECISION ', 1)[1]))
+        try:
+            row = {
+                'accepted': int(fields['accepted']),
+                'reason': fields['reason'],
+                'response': float(fields['response']),
+                'translation_correction': float(fields['translation_correction']),
+                'rotation_correction': float(fields['rotation_correction']),
+                'accepted_count': int(fields['accepted_count']),
+                'rejected_count': int(fields['rejected_count']),
+            }
+            if row['accepted'] not in (0, 1) or not all(math.isfinite(row[key]) for key in (
+                    'response', 'translation_correction', 'rotation_correction')):
+                raise ValueError('nonfinite or invalid guarded decision')
+            rows.append(row)
+        except (KeyError, ValueError) as exc:
+            errors.append(str(exc))
+    accepted = [row for row in rows if row['accepted']]
+    rejected = [row for row in rows if not row['accepted']]
+    reasons = {}
+    for row in rejected:
+        reasons[row['reason']] = reasons.get(row['reason'], 0) + 1
+    return {
+        'decision_count': len(rows),
+        'accepted': len(accepted),
+        'rejected': len(rejected),
+        'rejection_reasons': reasons,
+        'minimum_accepted_response': min([row['response'] for row in accepted] or [None]),
+        'maximum_rejected_response': max([row['response'] for row in rejected] or [None]),
+        'maximum_accepted_translation_correction': max(
+            [row['translation_correction'] for row in accepted] or [0]),
+        'maximum_accepted_rotation_correction': max(
+            [row['rotation_correction'] for row in accepted] or [0]),
+        'final_accepted_count': rows[-1]['accepted_count'] if rows else 0,
+        'final_rejected_count': rows[-1]['rejected_count'] if rows else 0,
+        'parse_errors': errors,
+        'complete': not errors and (not rows or (
+            rows[-1]['accepted_count'] == len(accepted) and
+            rows[-1]['rejected_count'] == len(rejected))),
+    }
 
 
 def lidar_reader_command(command, mode):
@@ -260,6 +312,8 @@ def main():
                         help='Cartesian mode uses bounded same-scan fractional-angle chords')
     parser.add_argument('--lidar-input-scans', type=int, default=0,
                         help='Capture up to 1200 pre-binning scans in RAM; default disabled')
+    parser.add_argument('--matcher-profile', choices=('narrow', 'guarded'), default='narrow',
+                        help='Guarded requires the candidate SLAM overlay; default preserves narrow')
     parser.add_argument('--turn-speed', type=float, default=0.18,
                         help='Initial in-place turn motor command, 0.08..0.30; [ and ] adjust it live')
     args = parser.parse_args()
@@ -291,6 +345,7 @@ def main():
                 "lidar_reader": args.lidar_reader,
                 "lidar_resampling": args.lidar_resampling,
                 "lidar_input_scans": args.lidar_input_scans,
+                "matcher_profile": args.matcher_profile,
                 "initial_turn_speed": args.turn_speed,
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
@@ -374,7 +429,8 @@ def main():
                 return super(TrialSession, self).stop_stack()
 
         session.MappingSession = TrialSession
-        sys.argv = ["mapping_session.py", args.name, "euclidean_heading", "narrow", args.odom]
+        sys.argv = ["mapping_session.py", args.name, "euclidean_heading",
+                    args.matcher_profile, args.odom]
         print("Trial source snapshot: {}\nRAM output: {}\nPhase: {}".format(
             root / "sources", root, args.phase), flush=True)
         session.main()

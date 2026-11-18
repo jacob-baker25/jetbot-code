@@ -50,12 +50,20 @@ class ProfilesTest(unittest.TestCase):
         differing = {key for key in profiles["baseline"]
                      if profiles["baseline"][key] != profiles["narrow"][key]}
         self.assertEqual(differing, {"correlation_search_space_dimension"})
+        guarded_differences = {key for key in profiles["baseline"]
+                               if profiles["baseline"][key] != profiles["guarded"][key]}
+        self.assertEqual(guarded_differences, {
+            "correlation_search_space_dimension",
+            "sequential_match_minimum_response",
+            "sequential_match_maximum_translation",
+            "sequential_match_maximum_rotation",
+        })
 
     def test_valid_internal_values_pass(self):
         for profile in PROFILE_FILES:
             actual, errors = check_karto_config(log_for(profile), profile)
             self.assertEqual(errors, [])
-            self.assertEqual(len(actual), 28)
+            self.assertEqual(len(actual), 31)
 
     def test_old_binary_or_wrong_profile_fails(self):
         self.assertTrue(check_karto_config("", "baseline")[1])
@@ -123,6 +131,7 @@ class ProfilesTest(unittest.TestCase):
                     rows.append(row)
         report = markdown_report(rows, "test")
         self.assertIn("| euclidean_heading | baseline | rf2o | 1 |", report)
+        self.assertIn("| euclidean_heading | guarded | rf2o | 1 |", report)
         self.assertIn("| euclidean_heading | narrow | rf2o | 1 |", report)
 
     def test_analyzer_separates_odometry_modes(self):
@@ -271,7 +280,14 @@ struct SMapper {
 int main(int argc, char **argv) {
   auto node = std::make_shared<rclcpp::Node>();
   std::string mode = argc > 1 ? argv[1] : "baseline";
-  if (mode == "narrow") node->overrides["correlation_search_space_dimension"] = 0.3;
+  if (mode == "narrow" || mode == "guarded") {
+    node->overrides["correlation_search_space_dimension"] = 0.3;
+  }
+  if (mode == "guarded") {
+    node->overrides["sequential_match_minimum_response"] = 0.30;
+    node->overrides["sequential_match_maximum_translation"] = 0.12;
+    node->overrides["sequential_match_maximum_rotation"] = 0.13962634015954636;
+  }
   if (mode == "edge") {
     node->declared["correlation_search_space_dimension"] = 0.3;
     node->overrides["distance_variance_penalty"] = 0.09;
@@ -300,6 +316,66 @@ int main(int argc, char **argv) {
                 output = subprocess.check_output([str(exe), profile]).decode()
                 self.assertEqual(check_karto_config(output, profile)[1], [])
             subprocess.run([str(exe), "edge"], check=True, stdout=subprocess.PIPE)
+
+    def test_sequential_match_guard_boundaries_and_recorded_separation(self):
+        include = ROOT / "slam_toolbox/lib/karto_sdk/include"
+        code = r'''
+#include <cassert>
+#include <cmath>
+#include <limits>
+#include "karto_sdk/SequentialMatchGuard.h"
+using namespace karto;
+int main() {
+  const SequentialMatchGuardConfig off = {0.0, 0.0, 0.0};
+  assert(EvaluateSequentialMatch(off, 0.0, 0, 0, 0, 99, 99, 3).accepted);
+  const SequentialMatchGuardConfig guard = {0.30, 0.12, 0.13962634015954636};
+  assert(EvaluateSequentialMatch(guard, 0.30, 0, 0, 0, 0.12, 0, 0.13962634015954636).accepted);
+  assert(!EvaluateSequentialMatch(guard, 0.2999, 0, 0, 0, 0, 0, 0).accepted);
+  assert(!EvaluateSequentialMatch(guard, 0.5, 0, 0, 0, 0.1201, 0, 0).accepted);
+  assert(!EvaluateSequentialMatch(guard, 0.5, 0, 0, 0, 0, 0, 0.1397).accepted);
+  assert(!EvaluateSequentialMatch(guard, std::numeric_limits<double>::quiet_NaN(),
+    0, 0, 0, 0, 0, 0).accepted);
+  const double pi = 3.141592653589793;
+  const auto wrapped = EvaluateSequentialMatch(guard, 0.5, 0, 0, pi - 0.02,
+    0, 0, -pi + 0.02);
+  assert(wrapped.accepted && std::abs(wrapped.rotation_correction - 0.04) < 1e-12);
+
+  const double healthy[][3] = {
+    {0.456140, 0.0300, 2.80}, {0.485598, 0.0000, 1.20},
+    {0.559923, 0.0510, 3.20}, {0.622527, 0.0100, 0.40},
+    {0.564782, 0.0224, 3.00}, {0.520263, 0.0100, 0.20},
+    {0.609397, 0.0283, 5.60}, {0.565398, 0.0100, 0.20},
+    {0.425350, 0.0721, 3.00}, {0.438940, 0.0141, 2.40},
+    {0.531652, 0.0922, 6.00}, {0.601110, 0.0224, 5.00},
+    {0.590744, 0.0447, 2.80}, {0.488389, 0.0141, 2.00},
+    {0.522967, 0.0000, 0.40}, {0.570014, 0.0000, 0.40},
+    {0.478183, 0.0000, 0.20}, {0.512941, 0.0000, 0.40},
+    {0.489617, 0.0224, 0.60}};
+  for (const auto & row : healthy) {
+    assert(EvaluateSequentialMatch(guard, row[0], 0, 0, 0, row[1], 0,
+      row[2] * pi / 180.0).accepted);
+  }
+  const double hallway[][3] = {
+    {0.129891, 0.1789, 20.80}, {0.120980, 0.2126, 14.20},
+    {0.147915, 0.1649, 1.20}, {0.207444, 0.1393, 2.00},
+    {0.172860, 0.1789, 14.40}, {0.153762, 0.0781, 3.40},
+    {0.162348, 0.1565, 4.00}, {0.216111, 0.0949, 0.00},
+    {0.180624, 0.0361, 0.20}, {0.212604, 0.1414, 1.80}};
+  for (const auto & row : hallway) {
+    const auto decision = EvaluateSequentialMatch(guard, row[0], 0, 0, 0,
+      row[1], 0, row[2] * pi / 180.0);
+    assert(!decision.accepted);
+    assert(decision.reason == SequentialMatchDecisionReason::LowResponse);
+  }
+}
+'''
+        with tempfile.TemporaryDirectory() as folder:
+            src = Path(folder) / "guard.cpp"
+            exe = Path(folder) / "guard"
+            src.write_text(code)
+            subprocess.run(["g++", "-std=c++14", "-Wall", "-Wextra", "-Werror",
+                            "-I", str(include), str(src), "-o", str(exe)], check=True)
+            subprocess.run([str(exe)], check=True)
 
 
 if __name__ == "__main__":

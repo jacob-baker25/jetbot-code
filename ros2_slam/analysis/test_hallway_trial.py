@@ -33,6 +33,24 @@ def session_method(name, namespace):
 
 
 class HallwayTrialTest(unittest.TestCase):
+    def test_karto_guard_decision_summary_is_bounded_and_complete(self):
+        log = "\n".join([
+            "[slam] KARTO_SEQ_DECISION accepted=1 reason=accepted response=0.52 "
+            "translation_correction=0.03 rotation_correction=0.04 accepted_count=1 rejected_count=0",
+            "[slam] KARTO_SEQ_DECISION accepted=0 reason=low_response response=0.17 "
+            "translation_correction=0.18 rotation_correction=0.25 accepted_count=1 rejected_count=1",
+        ])
+        summary = runner.parse_karto_decisions(log)
+        self.assertTrue(summary['complete'])
+        self.assertEqual(summary['accepted'], 1)
+        self.assertEqual(summary['rejected'], 1)
+        self.assertEqual(summary['rejection_reasons'], {'low_response': 1})
+        self.assertEqual(summary['minimum_accepted_response'], .52)
+        self.assertEqual(summary['maximum_rejected_response'], .17)
+        self.assertEqual(summary['maximum_accepted_translation_correction'], .03)
+        self.assertFalse(runner.parse_karto_decisions(
+            'KARTO_SEQ_DECISION accepted=bad')['complete'])
+
     def test_lidar_mode_marker_and_summary(self):
         for mode, size in (('blocking', 5), ('batched', 200)):
             self.assertEqual(runner.lidar_reader_command('python3 bridge.py', mode),
@@ -306,6 +324,7 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertEqual(manifest['rf2o_log_level'], 'warn')
             self.assertEqual(manifest['lidar_input_scans'],0)
             self.assertEqual(manifest['lidar_resampling'],'legacy')
+            self.assertEqual(manifest['matcher_profile'],'narrow')
             self.assertEqual(manifest['initial_turn_speed'],.12)
             self.assertGreater(manifest['observer_saved_bytes'],0)
             self.assertTrue(manifest['rf2o_command'].endswith('--log-level warn'))

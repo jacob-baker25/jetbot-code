@@ -2317,6 +2317,15 @@ protected:
   // whether to increase the search space if no good matches are initially found
   Parameter<kt_bool> * m_pUseResponseExpansion;
 
+  // Runtime-only experimental guard. These are intentionally not serialized:
+  // the active profile must explicitly select its admission policy without
+  // changing the existing pose-graph archive format.
+  Parameter<kt_double> * m_pSequentialMatchMinimumResponse;
+  Parameter<kt_double> * m_pSequentialMatchMaximumTranslation;
+  Parameter<kt_double> * m_pSequentialMatchMaximumRotation;
+  kt_int32u m_SequentialMatchAcceptedCount;
+  kt_int32u m_SequentialMatchRejectedCount;
+
   friend class boost::serialization::access;
   template<class Archive>
   void serialize(Archive & ar, const unsigned int version)
@@ -2404,6 +2413,9 @@ public:
   double getParamMinimumAnglePenalty();
   double getParamMinimumDistancePenalty();
   bool getParamUseResponseExpansion();
+  double getParamSequentialMatchMinimumResponse();
+  double getParamSequentialMatchMaximumTranslation();
+  double getParamSequentialMatchMaximumRotation();
 
   /* Setters */
   // General Parameters
@@ -2442,6 +2454,9 @@ public:
   void setParamMinimumAnglePenalty(double d);
   void setParamMinimumDistancePenalty(double d);
   void setParamUseResponseExpansion(bool b);
+  void setParamSequentialMatchMinimumResponse(double d);
+  void setParamSequentialMatchMaximumTranslation(double d);
+  void setParamSequentialMatchMaximumRotation(double d);
 };
 BOOST_SERIALIZATION_ASSUME_ABSTRACT(Mapper)
 }  // namespace karto

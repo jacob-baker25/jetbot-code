@@ -231,6 +231,15 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
   const bool use_response_expansion = readMapperParameter<bool>(node,
     "use_response_expansion", true);
   mapper_->setParamUseResponseExpansion(use_response_expansion);
+  const double sequential_match_minimum_response = readMapperParameter<double>(node,
+    "sequential_match_minimum_response", 0.0);
+  mapper_->setParamSequentialMatchMinimumResponse(sequential_match_minimum_response);
+  const double sequential_match_maximum_translation = readMapperParameter<double>(node,
+    "sequential_match_maximum_translation", 0.0);
+  mapper_->setParamSequentialMatchMaximumTranslation(sequential_match_maximum_translation);
+  const double sequential_match_maximum_rotation = readMapperParameter<double>(node,
+    "sequential_match_maximum_rotation", 0.0);
+  mapper_->setParamSequentialMatchMaximumRotation(sequential_match_maximum_rotation);
   // Read back Karto, not the ROS parameter store. Normalize legacy getters
   // to the units consumed by setters and declared in YAML.
   RCLCPP_INFO(node->get_logger(), "KARTO_CONFIG use_scan_matching=%.12g",
@@ -289,6 +298,12 @@ void SMapper::configure(const rclcpp::Node::SharedPtr & node)
     static_cast<double>(mapper_->getParamMinimumDistancePenalty()));
   RCLCPP_INFO(node->get_logger(), "KARTO_CONFIG use_response_expansion=%.12g",
     static_cast<double>(mapper_->getParamUseResponseExpansion()));
+  RCLCPP_INFO(node->get_logger(), "KARTO_CONFIG sequential_match_minimum_response=%.12g",
+    static_cast<double>(mapper_->getParamSequentialMatchMinimumResponse()));
+  RCLCPP_INFO(node->get_logger(), "KARTO_CONFIG sequential_match_maximum_translation=%.12g",
+    static_cast<double>(mapper_->getParamSequentialMatchMaximumTranslation()));
+  RCLCPP_INFO(node->get_logger(), "KARTO_CONFIG sequential_match_maximum_rotation=%.12g",
+    static_cast<double>(mapper_->getParamSequentialMatchMaximumRotation()));
 
 }
 
