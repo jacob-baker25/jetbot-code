@@ -173,6 +173,30 @@ class HallwayTrialTest(unittest.TestCase):
         self.assertEqual(node.turn_speed, .30)
         self.assertEqual(len(stopped), 31)
 
+    def test_rf2o_starts_after_scan_relay_and_slam(self):
+        import shlex
+        started = []
+        node = types.SimpleNamespace(
+            odom_mode='imu_yaw',
+            scan_distance_gate_mode='motion_aware',
+            slam_params_file='/tmp/profile.yaml',
+            start_process=lambda name, command: started.append(name),
+        )
+        namespace = dict(
+            time=types.SimpleNamespace(sleep=lambda seconds: None),
+            shlex=shlex,
+            LOCAL_NODES='/snapshot',
+            LASER_Z=.12,
+            LASER_YAW=0.,
+            BASE_FRAME='base_link',
+            LASER_FRAME='laser',
+        )
+        session_method('start_stack', namespace)(node)
+        self.assertEqual(started, [
+            'imu', 'lidar', 'static_tf', 'imu_yaw_odom',
+            'scan_delay', 'slam', 'rf2o'])
+        self.assertEqual(started[-1], 'rf2o')
+
     def test_stale_during_motion_stops_and_restores_terminal(self):
         stopped, restored = [], []
         def reject(): raise RuntimeError('MOTION_DATA_STALE scan')

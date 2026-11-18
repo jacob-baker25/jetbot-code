@@ -1031,12 +1031,8 @@ class MappingSession(Node):
                 "ros2 run rf2o_laser_odometry rf2o_laser_odometry_node"
             )
 
-        # 5. RF2O (direct baseline or raw input to IMU-yaw odometry).
-        self.start_process("rf2o", rf2o_command)
-
-        time.sleep(2.0)
-
-        # 6. Delay relay
+        # 5. Delay relay. Start the remaining consumers before RF2O so their
+        # process startup cannot age RF2O's scan reference.
         self.start_process(
             "scan_delay",
             (
@@ -1049,7 +1045,7 @@ class MappingSession(Node):
 
         time.sleep(1.0)
 
-        # 7. SLAM
+        # 6. SLAM. It may wait for odometry until RF2O starts below.
         self.start_process(
             "slam",
             (
@@ -1064,6 +1060,14 @@ class MappingSession(Node):
                 shlex.quote(self.slam_params_file)
             )
         )
+
+        # Let the heavier Python/SLAM startup work finish while the robot is
+        # stationary and before RF2O establishes its first reference scan.
+        time.sleep(3.0)
+
+        # 7. RF2O (direct baseline or raw input to IMU-yaw odometry). Nothing
+        # else is launched after this process, protecting its startup window.
+        self.start_process("rf2o", rf2o_command)
 
         print()
         print(
