@@ -1031,21 +1031,9 @@ class MappingSession(Node):
                 "ros2 run rf2o_laser_odometry rf2o_laser_odometry_node"
             )
 
-        # 5. Delay relay. Start the remaining consumers before RF2O so their
-        # process startup cannot age RF2O's scan reference.
-        self.start_process(
-            "scan_delay",
-            (
-                "python3 "
-                "{}/scan_delay_node.py"
-            ).format(
-                LOCAL_NODES
-            )
-        )
-
-        time.sleep(1.0)
-
-        # 6. SLAM. It may wait for odometry until RF2O starts below.
+        # 5. Start the heavyweight SLAM process before RF2O, but do not start
+        # its scan relay yet. This avoids both RF2O startup starvation and a
+        # pre-TF MessageFilter backlog inside this older SLAM Toolbox build.
         self.start_process(
             "slam",
             (
@@ -1061,13 +1049,28 @@ class MappingSession(Node):
             )
         )
 
-        # Let the heavier Python/SLAM startup work finish while the robot is
+        # Let the heavier SLAM startup work finish while the robot is
         # stationary and before RF2O establishes its first reference scan.
         time.sleep(3.0)
 
-        # 7. RF2O (direct baseline or raw input to IMU-yaw odometry). Nothing
-        # else is launched after this process, protecting its startup window.
+        # 6. RF2O (direct baseline or raw input to IMU-yaw odometry).
         self.start_process("rf2o", rf2o_command)
+
+        # Establish raw/fused odometry and odom->base_link before SLAM receives
+        # any delayed scans. The only later process is the lightweight relay.
+        time.sleep(2.0)
+
+        # 7. Delay relay. Its first scan arrives after its own 300 ms delay,
+        # when the transform chain is already live.
+        self.start_process(
+            "scan_delay",
+            (
+                "python3 "
+                "{}/scan_delay_node.py"
+            ).format(
+                LOCAL_NODES
+            )
+        )
 
         print()
         print(

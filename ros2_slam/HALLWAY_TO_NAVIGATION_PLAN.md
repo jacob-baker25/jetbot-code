@@ -128,9 +128,11 @@ The launcher owns passive-observer shutdown and must save a nonempty
 `observer.jsonl` before timing analysis. An empty capture makes the timing result
 invalid even when RF2O and lidar internal summaries appear healthy.
 
-Start the scan-delay relay and SLAM before RF2O, then allow their startup load
-to settle. RF2O starts last from a stationary pose so later process creation
-cannot age its bounded 0.35-second reference. Reference expiry remains fatal;
+Start and settle the heavyweight SLAM process before RF2O, but withhold its
+scan relay so it cannot queue pre-TF scans. Start RF2O from a stationary pose,
+allow odometry/TF to establish, and only then start the lightweight delayed-scan
+relay. This protects RF2O's bounded 0.35-second reference without feeding the
+older SLAM build a transform-less scan backlog. Reference expiry remains fatal;
 do not widen the limit to conceal a runtime gap.
 
 ## Map use and autonomous traversal

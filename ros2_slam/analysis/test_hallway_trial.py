@@ -173,7 +173,7 @@ class HallwayTrialTest(unittest.TestCase):
         self.assertEqual(node.turn_speed, .30)
         self.assertEqual(len(stopped), 31)
 
-    def test_rf2o_starts_after_scan_relay_and_slam(self):
+    def test_slam_settles_before_rf2o_and_scan_relay_follows(self):
         import shlex
         started = []
         node = types.SimpleNamespace(
@@ -194,8 +194,9 @@ class HallwayTrialTest(unittest.TestCase):
         session_method('start_stack', namespace)(node)
         self.assertEqual(started, [
             'imu', 'lidar', 'static_tf', 'imu_yaw_odom',
-            'scan_delay', 'slam', 'rf2o'])
-        self.assertEqual(started[-1], 'rf2o')
+            'slam', 'rf2o', 'scan_delay'])
+        self.assertLess(started.index('slam'), started.index('rf2o'))
+        self.assertLess(started.index('rf2o'), started.index('scan_delay'))
 
     def test_stale_during_motion_stops_and_restores_terminal(self):
         stopped, restored = [], []
