@@ -204,7 +204,8 @@ class HallwayTrialTest(unittest.TestCase):
                 self.assertEqual(node.processes, [("observer", observer)])
                 self.assertEqual(fake.LOCAL_NODES, str(ram / "sources"))
                 self.assertEqual(node.start_process('lidar', 'unchanged'),
-                                 ('lidar', 'env JETBOT_LIDAR_READER=blocking unchanged'))
+                                 ('lidar', runner.lidar_input_command(
+                                     'env JETBOT_LIDAR_READER=blocking unchanged',0,ram/'lidar_input.jsonl')))
                 self.assertEqual(node.start_process('rf2o', 'ros2 run example node'),
                     ('rf2o', 'ros2 run example node --ros-args --log-level warn'))
                 if failed:
@@ -233,6 +234,7 @@ class HallwayTrialTest(unittest.TestCase):
             manifest = json.loads((ram / 'trial_manifest.json').read_text())
             self.assertEqual(manifest['status'], 'failed' if failed else 'complete')
             self.assertEqual(manifest['rf2o_log_level'], 'warn')
+            self.assertEqual(manifest['lidar_input_scans'],0)
             self.assertTrue(manifest['rf2o_command'].endswith('--log-level warn'))
             self.assertEqual(manifest['rf2o_log_scope'], 'process_default')
             if failed:

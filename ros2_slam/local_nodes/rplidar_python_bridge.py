@@ -11,6 +11,7 @@ from sensor_msgs.msg import LaserScan
 
 from rplidar import RPLidarException
 from lidar_serial_reader import BoundedRPLidar, BatchedRPLidar
+from lidar_input_capture import LidarInputCapture
 
 from lidar_scan_geometry import (
     NUM_BINS,
@@ -38,6 +39,10 @@ class RPLidarBridge(Node):
         )
 
         reader_mode = os.environ.get('JETBOT_LIDAR_READER', 'blocking')
+        self.input_capture = LidarInputCapture(
+            os.environ.get('JETBOT_LIDAR_INPUT_PATH'),
+            int(os.environ.get('JETBOT_LIDAR_INPUT_SCANS', '0')))
+        print('LIDAR_INPUT_CAPTURE version=1 limit={}'.format(self.input_capture.limit), flush=True)
         if reader_mode not in ('blocking', 'batched'):
             raise ValueError('Unknown lidar reader: '+reader_mode)
         reader = BatchedRPLidar if reader_mode == 'batched' else BoundedRPLidar
@@ -137,6 +142,7 @@ class RPLidarBridge(Node):
         msg.intensities = intensities
 
         self.publisher.publish(msg)
+        self.input_capture.record(scan, ranges, msg.header.stamp, angle_increment, now)
 
     def run(self):
         self.get_logger().info('Starting RPLidar scan loop')
@@ -211,6 +217,9 @@ class RPLidarBridge(Node):
             pass
 
         summary = self.lidar.timing_summary()
+        # Motor is stopped and serial disconnected before any capture disk I/O.
+        self.input_capture.save()
+        summary['input_capture'] = self.input_capture.summary()
         summary.update(scan_count=self.scan_count, scan_delivery_max_s=self.scan_delivery_max_s,
                        conversion_publish_max_s=self.publish_max_s, slow_events=list(self.slow_events))
         print('LIDAR_TIMING_SUMMARY ' + json.dumps(summary, allow_nan=False), flush=True)

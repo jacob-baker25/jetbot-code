@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -165,6 +166,19 @@ def lidar_reader_command(command, mode):
     return 'env JETBOT_LIDAR_READER='+mode+' '+command
 
 
+def lidar_input_command(command, count, path):
+    if not isinstance(count,int) or not 0<=count<=1200:
+        raise ValueError('LiDAR input capture limit must be 0..1200')
+    # Explicit zero prevents an inherited shell setting from enabling capture.
+    return 'env JETBOT_LIDAR_INPUT_SCANS={} JETBOT_LIDAR_INPUT_PATH={} {}'.format(
+        count,shlex.quote(str(path)),command)
+
+
+def require_lidar_input(log, count):
+    if 'LIDAR_INPUT_CAPTURE version=1 limit={}'.format(count) not in log.splitlines():
+        raise RuntimeError('LiDAR input capture marker missing/mismatched')
+
+
 def require_lidar_reader(log, mode):
     size = 200 if mode == 'batched' else 5
     expected = 'LIDAR_ACQUISITION version=1 mode={} batch_bytes={} max_buffer_bytes=3000'.format(mode, size)
@@ -229,7 +243,11 @@ def main():
                         help='Requires candidate estimate-policy marker; default leaves binary setting unchanged')
     parser.add_argument('--lidar-reader', choices=('blocking', 'batched'), default='blocking',
                         help='Batched normal packets reduce serial calls; blocking retains prior reader')
+    parser.add_argument('--lidar-input-scans', type=int, default=0,
+                        help='Capture up to 1200 pre-binning scans in RAM; default disabled')
     args = parser.parse_args()
+    if not 0<=args.lidar_input_scans<=1200:
+        parser.error('--lidar-input-scans must be 0..1200')
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,70}$", args.name):
         parser.error("Use a short name containing letters, digits, underscores or hyphens")
     package = Path(__file__).resolve().parent
@@ -252,6 +270,7 @@ def main():
                 "rf2o_log_scope": "process_default",
                 "rf2o_deadband": args.rf2o_deadband,
                 "lidar_reader": args.lidar_reader,
+                "lidar_input_scans": args.lidar_input_scans,
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
                 "installed_local_nodes_modified": False, "status": "starting"}
@@ -289,6 +308,7 @@ def main():
             def start_process(self, name, command):
                 if name == 'lidar':
                     command = lidar_reader_command(command, args.lidar_reader)
+                    command = lidar_input_command(command,args.lidar_input_scans,root/'lidar_input.jsonl')
                     manifest['lidar_command'] = command
                     write_json(root / 'trial_manifest.json', manifest)
                 if name == 'rf2o':
@@ -303,6 +323,7 @@ def main():
                     return False
                 require_pyramid_policy(Path(self.process_log_paths['rf2o']).read_text())
                 require_lidar_reader(Path(self.process_log_paths['lidar']).read_text(), args.lidar_reader)
+                require_lidar_input(Path(self.process_log_paths['lidar']).read_text(),args.lidar_input_scans)
                 print('Lidar acquisition policy: PASS; mode='+args.lidar_reader, flush=True)
                 if args.rf2o_deadband is not None:
                     require_estimate_policy(Path(self.process_log_paths['rf2o']).read_text(),

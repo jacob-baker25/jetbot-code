@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import itertools
+import math
 from pathlib import Path
 import sys
 import types
@@ -213,7 +214,8 @@ class LidarBridgeFailureTest(unittest.TestCase):
         geometry = load('geometry_under_test', ROOT / 'lidar_scan_geometry.py')
         modules = {'rclpy': ros, 'rclpy.node': node, 'sensor_msgs.msg': sensor,
                    'rplidar': vendor_module, 'lidar_serial_reader': reader,
-                   'lidar_scan_geometry': geometry}
+                   'lidar_scan_geometry': geometry,
+                   'lidar_input_capture':load('input_capture_under_test',ROOT/'lidar_input_capture.py')}
         with mock.patch.dict(sys.modules, modules):
             self.bridge = load('bridge_under_test', ROOT / 'rplidar_python_bridge.py')
 
@@ -234,6 +236,8 @@ class LidarBridgeFailureTest(unittest.TestCase):
         node.lidar.timing_summary.return_value = {'reader': 'blocking_serial_read'}
         node._shutdown_done = False
         node.scan_count = 0
+        node.input_capture = mock.Mock()
+        node.input_capture.summary.return_value = {'limit':0,'recorded':0}
         node.scan_delivery_max_s = node.publish_max_s = 0.
         node.slow_events = deque(maxlen=32)
         output = io.StringIO()
@@ -244,6 +248,25 @@ class LidarBridgeFailureTest(unittest.TestCase):
         self.assertEqual(output.getvalue().count('LIDAR_TIMING_SUMMARY'), 1)
         node.lidar.disconnect.assert_called_once()
         self.assertFalse(node.lidar.capture_active)
+
+    def test_input_recording_preserves_published_ranges_and_fractional_angles(self):
+        node=self.bridge.RPLidarBridge.__new__(self.bridge.RPLidarBridge)
+        stamp=types.SimpleNamespace(sec=12,nanosec=345)
+        node.get_clock=lambda:types.SimpleNamespace(now=lambda:types.SimpleNamespace(to_msg=lambda:stamp))
+        node.last_scan_time=0
+        node.publisher=mock.Mock()
+        node.input_capture=mock.Mock()
+        raw=[(10,45.625,1234.5),(8,45.875,1250.0),(10,90.25,2000.0)]
+        with mock.patch.object(self.bridge,'LaserScan',side_effect=lambda:types.SimpleNamespace(header=types.SimpleNamespace())):
+            node.publish_scan(raw)
+        msg=node.publisher.publish.call_args[0][0]
+        self.assertEqual(msg.ranges[315],1.25)  # existing last-return-wins preserved
+        self.assertEqual(msg.ranges[270],2.0)
+        self.assertEqual(sum(math.isfinite(v) for v in msg.ranges),2)
+        args=node.input_capture.record.call_args[0]
+        self.assertIs(args[0],raw)
+        self.assertIs(args[1],msg.ranges)
+        self.assertEqual(args[0][0][1],45.625)
 
 
 if __name__ == '__main__':
