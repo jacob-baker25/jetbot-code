@@ -166,6 +166,12 @@ def lidar_reader_command(command, mode):
     return 'env JETBOT_LIDAR_READER='+mode+' '+command
 
 
+def lidar_resampling_command(command, mode):
+    if mode not in ('legacy', 'cartesian'):
+        raise ValueError('Unknown lidar resampling')
+    return 'env JETBOT_LIDAR_RESAMPLING='+mode+' '+command
+
+
 def lidar_input_command(command, count, path):
     if not isinstance(count,int) or not 0<=count<=1200:
         raise ValueError('LiDAR input capture limit must be 0..1200')
@@ -184,6 +190,12 @@ def require_lidar_reader(log, mode):
     expected = 'LIDAR_ACQUISITION version=1 mode={} batch_bytes={} max_buffer_bytes=3000'.format(mode, size)
     if expected not in log.splitlines():
         raise RuntimeError('Lidar acquisition marker missing/mismatched')
+
+
+def require_lidar_resampling(log, mode):
+    expected = 'LIDAR_RESAMPLING version=1 mode='+mode
+    if expected not in log.splitlines():
+        raise RuntimeError('Lidar resampling marker missing/mismatched')
 
 
 def rf2o_deadband_command(command, mode):
@@ -243,6 +255,8 @@ def main():
                         help='Requires candidate estimate-policy marker; default leaves binary setting unchanged')
     parser.add_argument('--lidar-reader', choices=('blocking', 'batched'), default='blocking',
                         help='Batched normal packets reduce serial calls; blocking retains prior reader')
+    parser.add_argument('--lidar-resampling', choices=('legacy', 'cartesian'), default='legacy',
+                        help='Cartesian mode uses bounded same-scan fractional-angle chords')
     parser.add_argument('--lidar-input-scans', type=int, default=0,
                         help='Capture up to 1200 pre-binning scans in RAM; default disabled')
     args = parser.parse_args()
@@ -270,6 +284,7 @@ def main():
                 "rf2o_log_scope": "process_default",
                 "rf2o_deadband": args.rf2o_deadband,
                 "lidar_reader": args.lidar_reader,
+                "lidar_resampling": args.lidar_resampling,
                 "lidar_input_scans": args.lidar_input_scans,
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
@@ -308,6 +323,7 @@ def main():
             def start_process(self, name, command):
                 if name == 'lidar':
                     command = lidar_reader_command(command, args.lidar_reader)
+                    command = lidar_resampling_command(command, args.lidar_resampling)
                     command = lidar_input_command(command,args.lidar_input_scans,root/'lidar_input.jsonl')
                     manifest['lidar_command'] = command
                     write_json(root / 'trial_manifest.json', manifest)
@@ -323,8 +339,11 @@ def main():
                     return False
                 require_pyramid_policy(Path(self.process_log_paths['rf2o']).read_text())
                 require_lidar_reader(Path(self.process_log_paths['lidar']).read_text(), args.lidar_reader)
+                require_lidar_resampling(Path(self.process_log_paths['lidar']).read_text(),
+                                         args.lidar_resampling)
                 require_lidar_input(Path(self.process_log_paths['lidar']).read_text(),args.lidar_input_scans)
                 print('Lidar acquisition policy: PASS; mode='+args.lidar_reader, flush=True)
+                print('Lidar resampling policy: PASS; mode='+args.lidar_resampling, flush=True)
                 if args.rf2o_deadband is not None:
                     require_estimate_policy(Path(self.process_log_paths['rf2o']).read_text(),
                                             args.rf2o_deadband)

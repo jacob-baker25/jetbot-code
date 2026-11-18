@@ -16,6 +16,7 @@ from lidar_input_capture import LidarInputCapture
 from lidar_scan_geometry import (
     NUM_BINS,
     laser_scan_angles,
+    resample_cartesian_chords,
     ros_bin_for_hardware_angle,
 )
 
@@ -39,6 +40,9 @@ class RPLidarBridge(Node):
         )
 
         reader_mode = os.environ.get('JETBOT_LIDAR_READER', 'blocking')
+        self.resampling_mode = os.environ.get('JETBOT_LIDAR_RESAMPLING', 'legacy')
+        if self.resampling_mode not in ('legacy', 'cartesian'):
+            raise ValueError('Unknown lidar resampling: '+self.resampling_mode)
         self.input_capture = LidarInputCapture(
             os.environ.get('JETBOT_LIDAR_INPUT_PATH'),
             int(os.environ.get('JETBOT_LIDAR_INPUT_SCANS', '0')))
@@ -53,6 +57,7 @@ class RPLidarBridge(Node):
         )
         print('LIDAR_ACQUISITION version=1 mode={} batch_bytes={} max_buffer_bytes=3000'.format(
             reader_mode, 200 if reader_mode == 'batched' else 5), flush=True)
+        print('LIDAR_RESAMPLING version=1 mode={}'.format(self.resampling_mode), flush=True)
 
         self.recover_lidar_state()
 
@@ -111,16 +116,19 @@ class RPLidarBridge(Node):
         scan_time = now - self.last_scan_time
         self.last_scan_time = now
 
-        ranges = [float('inf')] * NUM_BINS
-        intensities = [0.0] * NUM_BINS
+        if getattr(self, 'resampling_mode', 'legacy') == 'cartesian':
+            ranges, intensities = resample_cartesian_chords(scan)
+        else:
+            ranges = [float('inf')] * NUM_BINS
+            intensities = [0.0] * NUM_BINS
 
-        for quality, angle_deg, distance_mm in scan:
-            index = ros_bin_for_hardware_angle(angle_deg)
-            distance_m = distance_mm / 1000.0
+            for quality, angle_deg, distance_mm in scan:
+                index = ros_bin_for_hardware_angle(angle_deg)
+                distance_m = distance_mm / 1000.0
 
-            if RANGE_MIN_M <= distance_m <= RANGE_MAX_M:
-                ranges[index] = distance_m
-                intensities[index] = float(quality)
+                if RANGE_MIN_M <= distance_m <= RANGE_MAX_M:
+                    ranges[index] = distance_m
+                    intensities[index] = float(quality)
 
         msg = LaserScan()
 

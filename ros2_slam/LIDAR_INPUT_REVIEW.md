@@ -127,6 +127,48 @@ Only then choose an estimator/input change for a stationary A/B and measured
 turn/straight tests. Do not resume elbow/autonomy trials on the basis of a better
 stationary number alone. Preserve the current original algorithm as the control.
 
+## Fractional-angle follow-up
+
+The `lidar_raw_angles_01` archive recorded 600/600 scans and 143543 raw
+points with no drops. Reconstructing the legacy floor/overwrite rule matched
+all 216000 published bins exactly. Valid collisions averaged 12.25 bins per
+scan, but the last-overwrite range difference was only 1.75 mm median and
+34.5 mm maximum; no collision exceeded 5 cm. The larger instability was the
+validity mask: 133.26 missing bins and 113.94 validity changes per scan.
+
+The original synthetic screen used 0.001 rad/scan turns. A dense positive
+control showed RF2O itself estimates those perfect scans at about 3.57 times
+the requested yaw. The screen was retained but corrected to the same +/-5.73
+degree total turn over 20 increments of 0.005 rad/scan. Dense controls estimate
++5.67/-5.69 degrees. Candidate turns must pass in both directions across three
+disjoint recorded angular-mask windows, plus still and signed 10 cm translation.
+
+The selected bounded candidate intersects each one-degree bin-center ray with
+the segment between bracketing same-scan fractional-angle returns. It refuses
+angular gaps over 3.0 degrees, endpoint chords over 0.35 m, extrapolation and
+out-of-range returns. It has no temporal state. Legacy remains the default and
+the candidate requires `--lidar-resampling cartesian`.
+
+All signed synthetic gates passed. On the complete measured stationary replay,
+validity changes fell from 113.94 to 19.39 bins/scan and RF2O translation fell
+from 10.91 cm to 0.41 cm; raw RF2O yaw remained imperfect at -3.95 degrees
+versus -7.37 degrees for the control. This qualifies one live stationary A/B
+candidate measurement, not mapping deployment or motion qualification.
+
+Run only one stationary candidate after the branch tests pass:
+
+```bash
+python3 ros2_slam/run_hallway_trial.py lidar_cartesian_stationary_01 \
+  --phase stationary --odom imu_yaw --rf2o-log-level warn \
+  --rf2o-deadband off --lidar-reader batched \
+  --lidar-resampling cartesian
+```
+
+At `MAPPING SESSION READY`, wait 60 seconds, press `L`, wait 5 seconds, then
+press `Q`. Do not run turns or routes until the stationary bundle and timing
+overhead are reviewed. The previous `lidar_raw_angles_01` run is the legacy
+control; do not repeat it.
+
 Reproduce existing replay on Linux with Eigen headers installed:
 
 ```bash

@@ -35,6 +35,38 @@ class LidarGeometryTest(unittest.TestCase):
         self.assertAlmostEqual(increment, 2.0 * math.pi / 360.0)
         self.assertAlmostEqual(angle_max, angle_min + 360 * increment)
 
+    def test_cartesian_resampling_intersects_planar_chord_at_bin_center(self):
+        raw = []
+        for angle in (0.0, 2.0):
+            raw.append((12, angle, 1000.0 / math.cos(math.radians(angle))))
+        ranges, intensities = geometry.resample_cartesian_chords(raw)
+        self.assertAlmostEqual(ranges[0], 1.0 / math.cos(math.radians(0.5)), places=10)
+        self.assertEqual(intensities[0], 12.0)
+
+    def test_cartesian_resampling_reverses_clockwise_hardware_bin(self):
+        raw = [(9, 89.0, 1000.0), (7, 91.0, 1000.0)]
+        ranges, intensities = geometry.resample_cartesian_chords(raw)
+        expected = math.cos(math.radians(1.0)) / math.cos(math.radians(0.5))
+        self.assertAlmostEqual(ranges[270], expected, places=10)
+        self.assertEqual(intensities[270], 7.0)
+
+    def test_cartesian_resampling_refuses_wide_angular_gap(self):
+        raw = [(10, 0.0, 1000.0), (10, 4.0, 1000.0)]
+        ranges, _ = geometry.resample_cartesian_chords(raw)
+        self.assertFalse(math.isfinite(ranges[0]))
+
+    def test_cartesian_resampling_refuses_long_endpoint_chord(self):
+        raw = [(10, 0.0, 10000.0), (10, 3.0, 10000.0)]
+        ranges, _ = geometry.resample_cartesian_chords(raw)
+        self.assertFalse(math.isfinite(ranges[0]))
+
+    def test_cartesian_resampling_brackets_across_zero_without_extrapolation(self):
+        raw = [(8, 359.0, 1000.0), (6, 1.0, 1000.0)]
+        ranges, intensities = geometry.resample_cartesian_chords(raw)
+        expected = math.cos(math.radians(1.0)) / math.cos(math.radians(0.5))
+        self.assertAlmostEqual(ranges[0], expected, places=10)
+        self.assertEqual(intensities[0], 6.0)
+
     def test_python36_syntax(self):
         for path in (HELPER, ROOT / "local_nodes" / "rplidar_python_bridge.py"):
             ast.parse(path.read_text(encoding="utf-8"), feature_version=(3, 6))

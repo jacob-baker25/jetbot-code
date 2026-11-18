@@ -46,6 +46,18 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertEqual(result['summaries'][0]['recovery_count'], 0)
         self.assertFalse(runner.parse_lidar_acquisition('LIDAR_TIMING_SUMMARY broken')['complete'])
 
+    def test_lidar_resampling_is_explicit_and_verified(self):
+        for mode in ('legacy', 'cartesian'):
+            command = runner.lidar_resampling_command('python3 bridge.py', mode)
+            self.assertEqual(command,
+                             'env JETBOT_LIDAR_RESAMPLING='+mode+' python3 bridge.py')
+            marker = 'LIDAR_RESAMPLING version=1 mode='+mode
+            runner.require_lidar_resampling(marker+'\n', mode)
+            with self.assertRaises(RuntimeError):
+                runner.require_lidar_resampling('', mode)
+        with self.assertRaises(ValueError):
+            runner.lidar_resampling_command('python3 bridge.py', 'invalid')
+
     def test_lidar_contract_failure_prevents_any_process_start(self):
         with mock.patch.object(runner.subprocess, 'check_call',
                 side_effect=runner.subprocess.CalledProcessError(1,'driver contract')), \
@@ -205,7 +217,9 @@ class HallwayTrialTest(unittest.TestCase):
                 self.assertEqual(fake.LOCAL_NODES, str(ram / "sources"))
                 self.assertEqual(node.start_process('lidar', 'unchanged'),
                                  ('lidar', runner.lidar_input_command(
-                                     'env JETBOT_LIDAR_READER=blocking unchanged',0,ram/'lidar_input.jsonl')))
+                                     'env JETBOT_LIDAR_RESAMPLING=legacy '
+                                     'env JETBOT_LIDAR_READER=blocking unchanged',
+                                     0,ram/'lidar_input.jsonl')))
                 self.assertEqual(node.start_process('rf2o', 'ros2 run example node'),
                     ('rf2o', 'ros2 run example node --ros-args --log-level warn'))
                 if failed:
@@ -235,6 +249,7 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertEqual(manifest['status'], 'failed' if failed else 'complete')
             self.assertEqual(manifest['rf2o_log_level'], 'warn')
             self.assertEqual(manifest['lidar_input_scans'],0)
+            self.assertEqual(manifest['lidar_resampling'],'legacy')
             self.assertTrue(manifest['rf2o_command'].endswith('--log-level warn'))
             self.assertEqual(manifest['rf2o_log_scope'], 'process_default')
             if failed:
