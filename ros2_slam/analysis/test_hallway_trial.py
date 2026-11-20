@@ -33,6 +33,13 @@ def session_method(name, namespace):
 
 
 class HallwayTrialTest(unittest.TestCase):
+    def test_source_commit_can_be_pinned_for_exported_snapshot(self):
+        commit = 'A' * 40
+        self.assertEqual(runner.resolve_source_git_head(ROOT, commit),
+                         ('a' * 40, 'argument'))
+        with self.assertRaises(ValueError):
+            runner.resolve_source_git_head(ROOT, 'not-a-commit')
+
     def test_karto_guard_decision_summary_is_bounded_and_complete(self):
         log = "\n".join([
             "[slam] KARTO_SEQ_DECISION accepted=1 reason=accepted response=0.52 "
@@ -50,6 +57,32 @@ class HallwayTrialTest(unittest.TestCase):
         self.assertEqual(summary['maximum_accepted_translation_correction'], .03)
         self.assertFalse(runner.parse_karto_decisions(
             'KARTO_SEQ_DECISION accepted=bad')['complete'])
+
+    def test_karto_graph_diagnostics_separate_near_loop_and_optimization(self):
+        log = "\n".join([
+            "KARTO_NEAR_DECISION state_id=7 chain_size=10 accepted=1 response=0.42 "
+            "translation_correction=0.03 rotation_correction=0.01",
+            "KARTO_NEAR_DECISION state_id=8 chain_size=12 accepted=0 response=0.08 "
+            "translation_correction=0.14 rotation_correction=0.20",
+            "KARTO_LOOP_DECISION stage=coarse state_id=20 chain_size=15 accepted=1 "
+            "response=0.51 translation_correction=0.07 rotation_correction=0.03 "
+            "variance_x=0.1 variance_y=0.2",
+            "KARTO_LOOP_DECISION stage=fine state_id=20 chain_size=15 accepted=0 "
+            "response=0.41 translation_correction=0.08 rotation_correction=0.04 "
+            "variance_x=0.1 variance_y=0.2",
+            "KARTO_OPTIMIZATION_SUMMARY correction_count=20 applied_count=19 "
+            "maximum_translation=0.11 maximum_rotation=0.05",
+        ])
+        summary = runner.parse_karto_graph_diagnostics(log)
+        self.assertTrue(summary['complete'])
+        self.assertEqual(summary['near_chain']['attempted'], 2)
+        self.assertEqual(summary['near_chain']['accepted'], 1)
+        self.assertEqual(summary['loop']['coarse']['accepted'], 1)
+        self.assertEqual(summary['loop']['fine']['rejected'], 1)
+        self.assertEqual(summary['optimization_count'], 1)
+        self.assertEqual(summary['maximum_optimization_translation'], .11)
+        self.assertFalse(runner.parse_karto_graph_diagnostics(
+            'KARTO_NEAR_DECISION accepted=bad')['complete'])
 
     def test_lidar_mode_marker_and_summary(self):
         for mode, size in (('blocking', 5), ('batched', 200)):

@@ -35,6 +35,21 @@ def snapshot_sources(source, destination):
     return hashes
 
 
+def resolve_source_git_head(package, explicit=None):
+    """Return the source commit and how it was obtained without noisy git stderr."""
+    if explicit is not None:
+        if not re.match(r'^[0-9a-fA-F]{40}$', explicit):
+            raise ValueError('source git head must be 40 hexadecimal characters')
+        return explicit.lower(), 'argument'
+    try:
+        value = subprocess.check_output(
+            ['git', '-C', str(package), 'rev-parse', 'HEAD'],
+            universal_newlines=True, stderr=subprocess.DEVNULL).strip()
+        return value, 'repository'
+    except (OSError, subprocess.CalledProcessError):
+        return None, 'unavailable'
+
+
 def archive_trial(root, target):
     """Never replace an existing result; keep RAM originals on any failure."""
     required = sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
@@ -81,8 +96,9 @@ def summarize(root, analysis_path):
         report['lidar_acquisition'] = parse_lidar_acquisition(lidar_log.read_text(errors='replace'))
     slam_log = results[0].parent / 'slam.log'
     if slam_log.exists():
-        report['karto_sequential_guard'] = parse_karto_decisions(
-            slam_log.read_text(errors='replace'))
+        slam_text = slam_log.read_text(errors='replace')
+        report['karto_sequential_guard'] = parse_karto_decisions(slam_text)
+        report['karto_graph_diagnostics'] = parse_karto_graph_diagnostics(slam_text)
     report["checkpoint_heading_changes"] = module.checkpoint_deltas(result)
     report["streams"] = {}
     checkpoints = result.get("checkpoints", [])
@@ -213,6 +229,88 @@ def parse_karto_decisions(log):
     }
 
 
+def parse_karto_graph_diagnostics(log):
+    """Summarize behavior-neutral near-chain, loop, and optimizer diagnostics."""
+    near = []
+    loops = []
+    optimizations = []
+    errors = []
+    for line in log.splitlines():
+        marker = next((value for value in (
+            'KARTO_NEAR_DECISION ', 'KARTO_LOOP_DECISION ',
+            'KARTO_OPTIMIZATION_SUMMARY ') if value in line), None)
+        if marker is None:
+            continue
+        fields = dict(re.findall(r'(\w+)=([^ ]+)', line.split(marker, 1)[1]))
+        try:
+            if marker == 'KARTO_OPTIMIZATION_SUMMARY ':
+                row = {
+                    'correction_count': int(fields['correction_count']),
+                    'applied_count': int(fields['applied_count']),
+                    'maximum_translation': float(fields['maximum_translation']),
+                    'maximum_rotation': float(fields['maximum_rotation']),
+                }
+                numeric = (row['maximum_translation'], row['maximum_rotation'])
+                if min(row['correction_count'], row['applied_count']) < 0:
+                    raise ValueError('negative optimization count')
+                if not all(math.isfinite(value) for value in numeric):
+                    raise ValueError('nonfinite graph diagnostic')
+                optimizations.append(row)
+            else:
+                row = {
+                    'accepted': int(fields['accepted']),
+                    'response': float(fields['response']),
+                    'translation_correction': float(fields['translation_correction']),
+                    'rotation_correction': float(fields['rotation_correction']),
+                    'state_id': int(fields['state_id']),
+                    'chain_size': int(fields['chain_size']),
+                }
+                if row['accepted'] not in (0, 1) or min(
+                        row['state_id'], row['chain_size']) < 0:
+                    raise ValueError('invalid graph decision')
+                numeric = (row['response'], row['translation_correction'],
+                           row['rotation_correction'])
+                if not all(math.isfinite(value) for value in numeric):
+                    raise ValueError('nonfinite graph diagnostic')
+                if marker == 'KARTO_LOOP_DECISION ':
+                    row['stage'] = fields['stage']
+                    if row['stage'] not in ('coarse', 'fine'):
+                        raise ValueError('invalid loop stage')
+                    loops.append(row)
+                else:
+                    near.append(row)
+        except (KeyError, ValueError) as exc:
+            errors.append(str(exc))
+
+    def decisions(rows):
+        accepted = [row for row in rows if row['accepted']]
+        return {
+            'attempted': len(rows),
+            'accepted': len(accepted),
+            'rejected': len(rows) - len(accepted),
+            'maximum_accepted_translation_correction': max(
+                [row['translation_correction'] for row in accepted] or [0]),
+            'maximum_accepted_rotation_correction': max(
+                [row['rotation_correction'] for row in accepted] or [0]),
+        }
+
+    loop_summary = {}
+    for stage in ('coarse', 'fine'):
+        loop_summary[stage] = decisions(
+            [row for row in loops if row['stage'] == stage])
+    return {
+        'near_chain': decisions(near),
+        'loop': loop_summary,
+        'optimization_count': len(optimizations),
+        'maximum_optimization_translation': max(
+            [row['maximum_translation'] for row in optimizations] or [0]),
+        'maximum_optimization_rotation': max(
+            [row['maximum_rotation'] for row in optimizations] or [0]),
+        'parse_errors': errors,
+        'complete': not errors,
+    }
+
+
 def lidar_reader_command(command, mode):
     if mode not in ('blocking', 'batched'):
         raise ValueError('Unknown lidar reader')
@@ -312,8 +410,11 @@ def main():
                         help='Cartesian mode uses bounded same-scan fractional-angle chords')
     parser.add_argument('--lidar-input-scans', type=int, default=0,
                         help='Capture up to 1200 pre-binning scans in RAM; default disabled')
-    parser.add_argument('--matcher-profile', choices=('narrow', 'guarded'), default='narrow',
-                        help='Guarded requires the candidate SLAM overlay; default preserves narrow')
+    parser.add_argument('--matcher-profile', choices=('narrow', 'guarded', 'guarded_strict'),
+                        default='narrow', help='Guarded profiles require the candidate SLAM overlay; '
+                        'default preserves narrow')
+    parser.add_argument('--source-git-head', default=None,
+                        help='Pinned 40-hex source commit for an exported source snapshot')
     parser.add_argument('--turn-speed', type=float, default=0.18,
                         help='Initial in-place turn motor command, 0.08..0.30; [ and ] adjust it live')
     args = parser.parse_args()
@@ -321,6 +422,9 @@ def main():
         parser.error('--lidar-input-scans must be 0..1200')
     if not math.isfinite(args.turn_speed) or not 0.08 <= args.turn_speed <= 0.30:
         parser.error('--turn-speed must be finite and within 0.08..0.30')
+    if args.source_git_head is not None and not re.match(
+            r'^[0-9a-fA-F]{40}$', args.source_git_head):
+        parser.error('--source-git-head must be exactly 40 hexadecimal characters')
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,70}$", args.name):
         parser.error("Use a short name containing letters, digits, underscores or hyphens")
     package = Path(__file__).resolve().parent
@@ -350,11 +454,8 @@ def main():
                 "start_unix": time.time(), "source_sha256": hashes,
                 "source_directory": str(package), "output_directory": str(root),
                 "installed_local_nodes_modified": False, "status": "starting"}
-    try:
-        manifest["git_head"] = subprocess.check_output(
-            ["git", "-C", str(package), "rev-parse", "HEAD"], universal_newlines=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        manifest["git_head"] = None
+    manifest["git_head"], manifest["git_head_source"] = resolve_source_git_head(
+        package, args.source_git_head)
     write_json(root / "trial_manifest.json", manifest)
     observer = None
     exit_code = 1

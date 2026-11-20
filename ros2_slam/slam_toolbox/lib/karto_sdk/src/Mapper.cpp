@@ -54,6 +54,21 @@ namespace karto
   #define DISTANCE_PENALTY_GAIN   0.2
   #define ANGLE_PENALTY_GAIN      0.2
 
+namespace
+{
+kt_double TranslationCorrection(const Pose2 & rFrom, const Pose2 & rTo)
+{
+  return std::hypot(rTo.GetX() - rFrom.GetX(), rTo.GetY() - rFrom.GetY());
+}
+
+kt_double RotationCorrection(const Pose2 & rFrom, const Pose2 & rTo)
+{
+  return std::abs(std::atan2(
+      std::sin(rTo.GetHeading() - rFrom.GetHeading()),
+      std::cos(rTo.GetHeading() - rFrom.GetHeading())));
+}
+}  // namespace
+
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -1465,10 +1480,27 @@ kt_bool MapperGraph::TryCloseLoop(LocalizedRangeScan * pScan, const Name & rSens
   LocalizedRangeScanVector candidateChain = FindPossibleLoopClosure(pScan, rSensorName, scanIndex);
 
   while (!candidateChain.empty()) {
+    const Pose2 searchPose = pScan->GetSensorPose();
     Pose2 bestPose;
     Matrix3 covariance;
     kt_double coarseResponse = m_pLoopScanMatcher->MatchScan(pScan, candidateChain,
         bestPose, covariance, false, false);
+
+    const kt_bool coarseAccepted =
+      (coarseResponse > m_pMapper->m_pLoopMatchMinimumResponseCoarse->GetValue()) &&
+      (covariance(0, 0) < m_pMapper->m_pLoopMatchMaximumVarianceCoarse->GetValue()) &&
+      (covariance(1, 1) < m_pMapper->m_pLoopMatchMaximumVarianceCoarse->GetValue());
+    std::cout << "KARTO_LOOP_DECISION"
+              << " stage=coarse"
+              << " state_id=" << pScan->GetStateId()
+              << " chain_size=" << candidateChain.size()
+              << " accepted=" << coarseAccepted
+              << " response=" << coarseResponse
+              << " translation_correction=" << TranslationCorrection(searchPose, bestPose)
+              << " rotation_correction=" << RotationCorrection(searchPose, bestPose)
+              << " variance_x=" << covariance(0, 0)
+              << " variance_y=" << covariance(1, 1)
+              << std::endl;
 
     std::stringstream stream;
     stream << "COARSE RESPONSE: " << coarseResponse <<
@@ -1479,9 +1511,7 @@ kt_bool MapperGraph::TryCloseLoop(LocalizedRangeScan * pScan, const Name & rSens
 
     m_pMapper->FireLoopClosureCheck(stream.str());
 
-    if ((coarseResponse > m_pMapper->m_pLoopMatchMinimumResponseCoarse->GetValue()) &&
-      (covariance(0, 0) < m_pMapper->m_pLoopMatchMaximumVarianceCoarse->GetValue()) &&
-      (covariance(1, 1) < m_pMapper->m_pLoopMatchMaximumVarianceCoarse->GetValue()))
+    if (coarseAccepted)
     {
       LocalizedRangeScan tmpScan(pScan->GetSensorName(), pScan->GetRangeReadingsVector());
       tmpScan.SetUniqueId(pScan->GetUniqueId());
@@ -1492,6 +1522,20 @@ kt_bool MapperGraph::TryCloseLoop(LocalizedRangeScan * pScan, const Name & rSens
       kt_double fineResponse = m_pMapper->m_pSequentialScanMatcher->MatchScan(&tmpScan,
           candidateChain,
           bestPose, covariance, false);
+
+      const kt_bool fineAccepted =
+        fineResponse >= m_pMapper->m_pLoopMatchMinimumResponseFine->GetValue();
+      std::cout << "KARTO_LOOP_DECISION"
+                << " stage=fine"
+                << " state_id=" << pScan->GetStateId()
+                << " chain_size=" << candidateChain.size()
+                << " accepted=" << fineAccepted
+                << " response=" << fineResponse
+                << " translation_correction=" << TranslationCorrection(searchPose, bestPose)
+                << " rotation_correction=" << RotationCorrection(searchPose, bestPose)
+                << " variance_x=" << covariance(0, 0)
+                << " variance_y=" << covariance(1, 1)
+                << std::endl;
 
       std::stringstream stream1;
       stream1 << "FINE RESPONSE: " << fineResponse << " (>" <<
@@ -1616,10 +1660,21 @@ void MapperGraph::LinkNearChains(
 
     Pose2 mean;
     Matrix3 covariance;
+    const Pose2 searchPose = pScan->GetSensorPose();
     // match scan against "near" chain
     kt_double response = m_pMapper->m_pSequentialScanMatcher->MatchScan(pScan, *iter, mean,
         covariance, false);
-    if (response > m_pMapper->m_pLinkMatchMinimumResponseFine->GetValue() - KT_TOLERANCE) {
+    const kt_bool accepted =
+      response > m_pMapper->m_pLinkMatchMinimumResponseFine->GetValue() - KT_TOLERANCE;
+    std::cout << "KARTO_NEAR_DECISION"
+              << " state_id=" << pScan->GetStateId()
+              << " chain_size=" << iter->size()
+              << " accepted=" << accepted
+              << " response=" << response
+              << " translation_correction=" << TranslationCorrection(searchPose, mean)
+              << " rotation_correction=" << RotationCorrection(searchPose, mean)
+              << std::endl;
+    if (accepted) {
       rMeans.push_back(mean);
       rCovariances.push_back(covariance);
       LinkChainToScan(*iter, pScan, mean, covariance);
@@ -1983,14 +2038,30 @@ void MapperGraph::CorrectPoses()
   if (pSolver != NULL) {
     pSolver->Compute();
 
+    kt_int32u appliedCount = 0;
+    kt_double maximumTranslation = 0.0;
+    kt_double maximumRotation = 0.0;
+
     const_forEach(ScanSolver::IdPoseVector, &pSolver->GetCorrections())
     {
       LocalizedRangeScan * scan = m_pMapper->m_pMapperSensorManager->GetScan(iter->first);
       if (scan == NULL) {
         continue;
       }
+      maximumTranslation = std::max(maximumTranslation,
+        TranslationCorrection(scan->GetSensorPose(), iter->second));
+      maximumRotation = std::max(maximumRotation,
+        RotationCorrection(scan->GetSensorPose(), iter->second));
+      appliedCount++;
       scan->SetSensorPose(iter->second);
     }
+
+    std::cout << "KARTO_OPTIMIZATION_SUMMARY"
+              << " correction_count=" << pSolver->GetCorrections().size()
+              << " applied_count=" << appliedCount
+              << " maximum_translation=" << maximumTranslation
+              << " maximum_rotation=" << maximumRotation
+              << std::endl;
 
     pSolver->Clear();
   }

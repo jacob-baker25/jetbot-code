@@ -58,6 +58,10 @@ class ProfilesTest(unittest.TestCase):
             "sequential_match_maximum_translation",
             "sequential_match_maximum_rotation",
         })
+        strict_differences = {key for key in profiles["guarded"]
+                              if profiles["guarded"][key] !=
+                              profiles["guarded_strict"][key]}
+        self.assertEqual(strict_differences, {"sequential_match_maximum_translation"})
 
     def test_valid_internal_values_pass(self):
         for profile in PROFILE_FILES:
@@ -132,6 +136,7 @@ class ProfilesTest(unittest.TestCase):
         report = markdown_report(rows, "test")
         self.assertIn("| euclidean_heading | baseline | rf2o | 1 |", report)
         self.assertIn("| euclidean_heading | guarded | rf2o | 1 |", report)
+        self.assertIn("| euclidean_heading | guarded_strict | rf2o | 1 |", report)
         self.assertIn("| euclidean_heading | narrow | rf2o | 1 |", report)
 
     def test_analyzer_separates_odometry_modes(self):
@@ -169,6 +174,7 @@ class ProfilesTest(unittest.TestCase):
                 ast.parse((ROOT / "local_nodes" / filename).read_text(), feature_version=(3, 6))
             ast.parse((ROOT / "slam_toolbox/launch/online_sync_launch.py").read_text(),
                       feature_version=(3, 6))
+            ast.parse((ROOT / "run_hallway_trial.py").read_text(), feature_version=(3, 6))
 
     @unittest.skipUnless(shutil.which("bash"), "bash required for deployment test")
     def test_deploy_copies_repair_profiles_helper_and_preserves_backup(self):
@@ -280,12 +286,13 @@ struct SMapper {
 int main(int argc, char **argv) {
   auto node = std::make_shared<rclcpp::Node>();
   std::string mode = argc > 1 ? argv[1] : "baseline";
-  if (mode == "narrow" || mode == "guarded") {
+  if (mode == "narrow" || mode == "guarded" || mode == "guarded_strict") {
     node->overrides["correlation_search_space_dimension"] = 0.3;
   }
-  if (mode == "guarded") {
+  if (mode == "guarded" || mode == "guarded_strict") {
     node->overrides["sequential_match_minimum_response"] = 0.30;
-    node->overrides["sequential_match_maximum_translation"] = 0.12;
+    node->overrides["sequential_match_maximum_translation"] =
+      mode == "guarded_strict" ? 0.05 : 0.12;
     node->overrides["sequential_match_maximum_rotation"] = 0.13962634015954636;
   }
   if (mode == "edge") {
@@ -366,6 +373,23 @@ int main() {
       row[1], 0, row[2] * pi / 180.0);
     assert(!decision.accepted);
     assert(decision.reason == SequentialMatchDecisionReason::LowResponse);
+  }
+
+  const SequentialMatchGuardConfig strict = {0.30, 0.05, 0.13962634015954636};
+  // The largest corrections observed in the successful guarded turn pair remain admitted.
+  assert(EvaluateSequentialMatch(strict, 0.518, 0, 0, 0,
+    0.036055, 0, 0.07678).accepted);
+  assert(EvaluateSequentialMatch(strict, 0.596, 0, 0, 0,
+    0.035, 0, 0.07).accepted);
+  // The two suspicious accepted mixed-route corrections cross only the new limit.
+  const double mixedProblematic[] = {0.0806226, 0.0824621};
+  for (const double correction : mixedProblematic) {
+    assert(EvaluateSequentialMatch(guard, 0.50, 0, 0, 0,
+      correction, 0, 0.02).accepted);
+    const auto decision = EvaluateSequentialMatch(strict, 0.50, 0, 0, 0,
+      correction, 0, 0.02);
+    assert(!decision.accepted);
+    assert(decision.reason == SequentialMatchDecisionReason::TranslationLimit);
   }
 }
 '''

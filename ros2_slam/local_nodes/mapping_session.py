@@ -3316,7 +3316,8 @@ def main():
 
     matcher_profile = sys.argv[3] if len(sys.argv) >= 4 else "baseline"
     if matcher_profile not in PROFILE_FILES:
-        print("Matcher profile must be 'baseline', 'narrow', or 'guarded'.")
+        print("Matcher profile must be one of: {}.".format(
+            ", ".join(sorted(PROFILE_FILES))))
         sys.exit(1)
 
     odom_mode = sys.argv[4] if len(sys.argv) == 5 else "rf2o"

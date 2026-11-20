@@ -6,6 +6,7 @@ PROFILE_FILES = {
     "baseline": "mapper_params_online_sync.yaml",
     "narrow": "mapper_params_online_sync_narrow.yaml",
     "guarded": "mapper_params_online_sync_guarded.yaml",
+    "guarded_strict": "mapper_params_online_sync_guarded_strict.yaml",
 }
 
 # Effective C++ defaults used before the parameter-loading repair.
@@ -47,11 +48,12 @@ def expected_parameters(profile):
     if profile not in PROFILE_FILES:
         raise ValueError("Unknown matcher profile: " + profile)
     expected = dict(BASELINE)
-    if profile in ("narrow", "guarded"):
+    if profile in ("narrow", "guarded", "guarded_strict"):
         expected["correlation_search_space_dimension"] = 0.3
-    if profile == "guarded":
+    if profile in ("guarded", "guarded_strict"):
         expected["sequential_match_minimum_response"] = 0.30
-        expected["sequential_match_maximum_translation"] = 0.12
+        expected["sequential_match_maximum_translation"] = (
+            0.05 if profile == "guarded_strict" else 0.12)
         expected["sequential_match_maximum_rotation"] = 0.13962634015954636
     return expected
 
