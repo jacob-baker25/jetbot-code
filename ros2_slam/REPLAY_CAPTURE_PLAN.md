@@ -58,6 +58,23 @@ lateness so an identical second replay can distinguish a single startup or
 SLAM-processing stall from sustained replay overload before moving data is
 used for matcher comparisons.
 
+The instrumented repeat passed the scheduling gate.  It scheduled all 9,143
+selected events, published 1,466 delayed scans, 1,091 fused odometry messages,
+and 1,091 odom-to-base transforms, and filtered all 5,495 baseline map-to-odom
+outputs.  There were zero late messages: median lateness was 0.000224 s, p95
+0.00531 s, p99 0.00805 s, and maximum 0.124 s against the 0.25 s limit.  Its
+map raster again matched both the live stationary map and the first replay at
+all 9,768 pixels (raster SHA-256
+`485af89d80f408fa53c8a562bf53db5d17cab42cba953186deb929d53d57a318`).
+The copied replay-result archive SHA-256 is
+`eeab2dde38fb81368df18ea588e24b1955604cbf2bd34343bbce9dba288764f5`.
+
+This qualifies the replay mechanism for a controlled moving capture, subject
+to the same per-run zero-late-message gate.  It does not qualify moving scan
+matching: the stationary input created only Karto state 0.  Preserve the first
+timing-failed replay as evidence, but do not use a replay with nonzero late
+messages in matcher comparisons.
+
 Do not combine the first recorder test with denser graph insertion, range
 clipping, timestamp changes, or motion. This is only a recorder qualification.
 
