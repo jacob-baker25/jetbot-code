@@ -34,6 +34,20 @@ the trial fail. RAM originals are retained.
    replay message counts, SQLite integrity result, and zero-drop summary before
    any moving capture.
 
+The first qualified stationary capture contained 17,215 contiguous messages
+over 110.2 seconds, with all six topics present, zero drops, no writer errors,
+and a maximum queue depth of 8/4096.  All 1,466 delayed scans matched their raw
+scan payloads exactly.  This qualifies the capture path; it does not qualify a
+map or any matcher change.
+
+`local_nodes/replay_player.py` is the next deliberately narrow layer.  Its
+`slam_inputs` mode republishes `/scan_slam`, `/odom_rf2o`, and only the recorded
+`odom -> base_link` transforms at the captured receipt cadence.  It shifts all
+message stamps together onto the current ROS clock.  The original SLAM-owned
+`map -> odom` output is filtered, so it cannot leak the baseline solution into
+a candidate matcher.  Keep `--rate 1.0` for qualification; faster playback is
+not evidence-equivalent until separately tested.
+
 Do not combine the first recorder test with denser graph insertion, range
 clipping, timestamp changes, or motion. This is only a recorder qualification.
 
