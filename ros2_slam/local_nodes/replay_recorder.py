@@ -169,8 +169,10 @@ class ReplayRecorder(Node):
         self.maximum_queue = 0
         self.start_unix = time.time()
         self.start_mono = time.monotonic()
-        self.writer.start()
-        self.subscriptions = []
+        # Eloquent Node already exposes a read-only `subscriptions` property.
+        # Keep our handles under a private name, and do not start the non-daemon
+        # writer until every subscription has been constructed successfully.
+        self._replay_subscriptions = []
         self.subscribe("/scan", LaserScan, laser_scan, qos_profile_sensor_data)
         self.subscribe("/scan_slam", LaserScan, laser_scan, qos_profile_sensor_data)
         self.subscribe("/odom_rf2o", Odometry, odometry, 100)
@@ -178,6 +180,7 @@ class ReplayRecorder(Node):
         if odom_mode == "imu_yaw":
             self.subscribe("/imu/data_raw", Imu, imu, qos_profile_sensor_data)
             self.subscribe("/odom_rf2o_raw", Odometry, odometry, 100)
+        self.writer.start()
         print("REPLAY_RECORDER_READY version={} queue_messages={} topics={}".format(
             VERSION, QUEUE_MESSAGES, ",".join(sorted(self.received))), flush=True)
 
@@ -200,7 +203,7 @@ class ReplayRecorder(Node):
             except Exception as exc:
                 self.writer.errors.append("callback {}: {}".format(topic, repr(exc)))
 
-        self.subscriptions.append(
+        self._replay_subscriptions.append(
             self.create_subscription(message_type, topic, callback, qos))
 
     def finish(self):

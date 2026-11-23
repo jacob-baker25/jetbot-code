@@ -48,6 +48,15 @@ class HallwayTrialTest(unittest.TestCase):
         runner.require_replay_ready(log, topics)
         with self.assertRaises(RuntimeError):
             runner.require_replay_ready(log.replace('/scan_slam', '/missing'), topics)
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / 'recorder.log'
+            log_path.write_text(log)
+            process = types.SimpleNamespace(poll=lambda: None)
+            runner.wait_for_replay_ready(log_path, topics, process, timeout=.1)
+            log_path.write_text('recorder failed')
+            process = types.SimpleNamespace(poll=lambda: 1)
+            with self.assertRaisesRegex(RuntimeError, 'exited before readiness'):
+                runner.wait_for_replay_ready(log_path, topics, process, timeout=.1)
         with self.assertRaises(ValueError):
             runner.replay_topics('invalid')
 

@@ -57,6 +57,25 @@ def require_replay_ready(log, topics):
         raise RuntimeError("Replay recorder did not report topics: " + ", ".join(missing))
 
 
+def wait_for_replay_ready(log_path, topics, process, timeout=20.0):
+    """Bound recorder startup and report an early process exit accurately."""
+    deadline = time.monotonic() + timeout
+    last_error = "recorder log unavailable"
+    while time.monotonic() < deadline:
+        try:
+            log = log_path.read_text(errors="replace")
+            require_replay_ready(log, topics)
+            return
+        except (IOError, OSError, RuntimeError) as exc:
+            last_error = str(exc)
+        if process.poll() is not None:
+            raise RuntimeError(
+                "Replay recorder exited before readiness; inspect {} ({})".format(
+                    log_path, last_error))
+        time.sleep(0.1)
+    raise RuntimeError("Replay recorder readiness timed out: " + last_error)
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -652,9 +671,10 @@ def main():
                                             args.rf2o_deadband)
                     print('RF2O estimate policy: PASS; deadband='+args.rf2o_deadband, flush=True)
                 if args.record_replay:
-                    require_replay_ready(
-                        Path(self.process_log_paths['replay_recorder']).read_text(errors='replace'),
-                        topics)
+                    recorder = next(process for name, process in self.processes
+                                    if name == 'replay_recorder')
+                    wait_for_replay_ready(
+                        Path(self.process_log_paths['replay_recorder']), topics, recorder)
                     print('Replay recorder: PASS; all requested topics subscribed', flush=True)
                 return True
 

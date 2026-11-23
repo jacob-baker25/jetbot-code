@@ -17,6 +17,13 @@ class FakeNode(object):
     def __init__(self, name):
         self.name = name
 
+    @property
+    def subscriptions(self):
+        return ()
+
+    def create_subscription(self, message_type, topic, callback, qos):
+        return (message_type, topic, callback, qos)
+
 
 def load_recorder():
     rclpy = types.SimpleNamespace()
@@ -48,6 +55,16 @@ def load_recorder():
 
 
 class ReplayRecorderTest(unittest.TestCase):
+    def test_node_uses_private_subscription_handles_on_eloquent(self):
+        recorder, unused = load_recorder()
+        with tempfile.TemporaryDirectory() as directory:
+            node = recorder.ReplayRecorder(Path(directory), 'imu_yaw')
+            self.assertEqual(len(node._replay_subscriptions), 6)
+            self.assertEqual(node.subscriptions, ())
+            self.assertTrue(node.finish())
+            summary = json.loads((Path(directory) / 'summary.json').read_text())
+            self.assertEqual(summary['writer_errors'], [])
+
     def test_writer_persists_ordered_messages_and_counts(self):
         recorder, unused = load_recorder()
         with tempfile.TemporaryDirectory() as directory:
