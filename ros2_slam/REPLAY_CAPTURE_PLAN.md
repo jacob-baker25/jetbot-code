@@ -3,36 +3,44 @@
 ## Scope
 
 This candidate leaves the tested `guarded_strict` mapping profile unchanged.
-`--record-replay` adds a separate `ros2 bag` subscriber after the normal ROS
-stack is running. It records only to `/dev/shm`, is stopped before the sensor
-stack, and is not placed inside the eMMC evidence bundle.
+`--record-replay` adds a separate bounded `rclpy` subscriber after the normal
+ROS stack is running. It records a versioned SQLite replay dataset only to
+`/dev/shm`, is stopped before the sensor stack, and is not placed inside the
+eMMC evidence bundle. This fallback is used because the Jetson's Eloquent
+image does not include the optional `ros2 bag` extension.
 
 Recorded topics for IMU-yaw trials are:
 
 - `/scan` and `/scan_slam`;
 - `/odom_rf2o` and `/odom_rf2o_raw`;
 - `/imu/data_raw`;
-- `/tf` and `/tf_static`.
+- `/tf` (the known static laser transform is recorded in the trial manifest).
 
-The runner will not permit a trial unless rosbag reports that every requested
-topic was subscribed. At shutdown it requires a nonempty SQLite database,
-runs `ros2 bag info`, archives the bag in RAM, and records its SHA-256 in the
-normal trial manifest. A recorder, validation, or archive failure makes the
-trial fail. RAM originals are retained.
+The runner will not permit a trial until the recorder has actually received
+every requested topic. At shutdown it requires zero queue drops, no writer
+errors, a nonempty message count for every topic, and a successful SQLite
+integrity check. It then archives the capture in RAM and records its SHA-256 in
+the normal trial manifest. A recorder, validation, or archive failure makes
+the trial fail. RAM originals are retained.
 
 ## Safety sequence
 
 1. Fetch and unit-test the exact candidate commit in the isolated checkout.
-2. Check that Eloquent `ros2 bag record` is installed; do not install packages
-   as part of a trial.
+2. Unit-test the bounded recorder without opening hardware.
 3. Run one stationary trial with `--record-replay` and raw JSON capture off.
 4. Copy both the small eMMC evidence bundle and the separately printed replay
    archive from `/dev/shm` before rebooting.
 5. Qualify recorder load from the normal timing report, LiDAR timing summary,
-   message counts, and `ros2 bag info` before any moving capture.
+   replay message counts, SQLite integrity result, and zero-drop summary before
+   any moving capture.
 
 Do not combine the first recorder test with denser graph insertion, range
 clipping, timestamp changes, or motion. This is only a recorder qualification.
+
+The laser transform remains configurable as `--laser-x`, `--laser-y`,
+`--laser-z`, and `--laser-yaw`. Their defaults exactly preserve the tested
+configuration (0, 0, 0.1778 m, pi rad); provisional measurements must not
+silently replace it.
 
 ## Preliminary navigation geometry report
 
@@ -42,3 +50,8 @@ chosen side clearance, checks map-frame goals for connectivity, and reports
 whether recorded trajectory cells would be blocked. It is deliberately a
 preliminary gate: held-out localization, a real Nav2 plan, and supervised
 execution are still required.
+
+The current straight-clearance defaults are a 0.22 m by 0.22 m footprint and
+0.05 m clearance per side, giving a 0.32 m straight-passage target. This tool
+does not infer a turning radius from half the width and reports turning
+clearance as unevaluated.

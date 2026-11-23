@@ -39,12 +39,15 @@ class HallwayTrialTest(unittest.TestCase):
         self.assertIn('/scan_slam', topics)
         self.assertIn('/odom_rf2o_raw', topics)
         self.assertNotIn('/odom_rf2o_raw', runner.replay_topics('rf2o'))
-        command = runner.rosbag_record_command(Path('/dev/shm/a b'), topics)
-        self.assertIn("ros2 bag record -o '/dev/shm/a b'", command)
-        log = "All requested topics are subscribed. Stopping discovery...\n" + "\n".join(topics)
-        runner.require_rosbag_ready(log, topics)
+        command = runner.replay_recorder_command(
+            Path('/tmp/replay recorder.py'), Path('/dev/shm/a b'), 'imu_yaw')
+        self.assertIn("python3 -u '/tmp/replay recorder.py'", command)
+        self.assertIn("--output '/dev/shm/a b'", command)
+        log = "REPLAY_RECORDER_READY version=1\n" + "\n".join(
+            'REPLAY_TOPIC_FIRST topic=' + topic for topic in topics)
+        runner.require_replay_ready(log, topics)
         with self.assertRaises(RuntimeError):
-            runner.require_rosbag_ready(log.replace('/scan_slam', '/missing'), topics)
+            runner.require_replay_ready(log.replace('/scan_slam', '/missing'), topics)
         with self.assertRaises(ValueError):
             runner.replay_topics('invalid')
 
@@ -52,19 +55,24 @@ class HallwayTrialTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             bag = base / 'trial_replay_bag'; bag.mkdir()
-            (bag / 'metadata.yaml').write_text('metadata')
-            (bag / 'trial.db3').write_bytes(b'sqlite data')
+            database = bag / 'capture.sqlite3'
+            connection = runner.sqlite3.connect(str(database))
+            connection.execute('CREATE TABLE messages (topic TEXT, payload TEXT)')
+            topics = runner.replay_topics('imu_yaw')
+            for topic in topics:
+                connection.execute('INSERT INTO messages VALUES (?, ?)', (topic, '{}'))
+            connection.commit(); connection.close()
+            runner.write_json(bag / 'summary.json', {
+                'version': 1, 'drops': 0, 'writer_errors': []})
             archive = base / 'trial_replay_bag.tar.gz'
-            info_path = base / 'rosbag_info.txt'
-            info = 'Messages: 10\nTopic information: Topic: /scan\n'
-            with mock.patch.object(runner.subprocess, 'check_output', return_value=info):
-                result = runner.finalize_replay_capture(bag, archive, info_path)
+            info_path = base / 'replay_capture_info.json'
+            result = runner.finalize_replay_capture(bag, archive, info_path, topics)
             self.assertEqual(result['status'], 'complete')
-            self.assertEqual(result['database_bytes'], len(b'sqlite data'))
+            self.assertGreater(result['database_bytes'], 0)
             self.assertEqual(result['archive_sha256'], runner.sha256_file(archive))
-            self.assertEqual(info_path.read_text(), info)
+            self.assertEqual(json.loads(info_path.read_text())['integrity_check'], 'ok')
             with tarfile.open(archive) as saved:
-                self.assertTrue(any(member.name.endswith('trial.db3') for member in saved))
+                self.assertTrue(any(member.name.endswith('capture.sqlite3') for member in saved))
 
     def test_source_commit_can_be_pinned_for_exported_snapshot(self):
         commit = 'A' * 40
@@ -270,6 +278,8 @@ class HallwayTrialTest(unittest.TestCase):
             time=types.SimpleNamespace(sleep=lambda seconds: None),
             shlex=shlex,
             LOCAL_NODES='/snapshot',
+            LASER_X=0.,
+            LASER_Y=0.,
             LASER_Z=.12,
             LASER_YAW=0.,
             BASE_FRAME='base_link',
@@ -391,6 +401,9 @@ class HallwayTrialTest(unittest.TestCase):
             self.assertEqual(manifest['lidar_input_scans'],0)
             self.assertEqual(manifest['lidar_resampling'],'legacy')
             self.assertEqual(manifest['matcher_profile'],'narrow')
+            self.assertEqual(manifest['laser_transform'], {
+                'x_m': 0.0, 'y_m': 0.0, 'z_m': 0.1778,
+                'yaw_rad': runner.math.pi})
             self.assertEqual(manifest['initial_turn_speed'],.12)
             self.assertGreater(manifest['observer_saved_bytes'],0)
             self.assertTrue(manifest['rf2o_command'].endswith('--log-level warn'))
@@ -401,6 +414,7 @@ class HallwayTrialTest(unittest.TestCase):
     def test_python36_syntax(self):
         for path in [ROOT / 'run_hallway_trial.py', ROOT / 'local_nodes/motion_freshness.py',
                      ROOT / 'local_nodes/mapping_session.py', ROOT / 'local_nodes/observe_imu_timing.py',
+                     ROOT / 'local_nodes/replay_recorder.py',
                      ROOT / 'analysis/analyze_map_navigation.py']:
             source = path.read_text(encoding='utf8')
             if sys.version_info >= (3, 8):

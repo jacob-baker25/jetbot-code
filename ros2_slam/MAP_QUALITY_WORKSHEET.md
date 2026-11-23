@@ -5,20 +5,25 @@ more useful than visual guesses; use meters and note the measurement uncertainty
 
 ## Robot and LiDAR
 
-- Robot/wheelchair maximum width:
-- Robot/wheelchair maximum length:
-- Desired extra clearance on each side:
+- Robot maximum width: 0.22 m (Waveshare manufacturer footprint, conservative)
+- Robot maximum length: 0.22 m
+- Desired extra clearance on each side: 0.05 m
 - `base_link` physical reference point:
 - LiDAR center forward (+) / backward (-) from `base_link`:
-- LiDAR center left (+) / right (-) from `base_link`:
+- LiDAR center left (+) / right (-) from `base_link`: approximately 0 m, provisional
 - LiDAR height:
-- LiDAR yaw relative to robot forward:
+- LiDAR yaw relative to robot forward: 0 degrees provisional; verify scan convention
 - Mount rigid when gently pushed: yes/no
 - LiDAR approximately level: yes/no
 
 The tested configuration currently assumes LiDAR x=0.00 m, y=0.00 m,
 z=0.1778 m, yaw=pi rad. Do not change it from estimates; record measured values
 first so a transform candidate can be replayed and independently tested.
+
+For straight-passage screening, use a 0.32 m minimum (0.22 m width plus
+0.05 m per side). This does not define turning clearance or turning radius.
+Turning must be checked using the full rectangular footprint swept through the
+turn; never approximate it as half the width.
 
 ## Test space
 

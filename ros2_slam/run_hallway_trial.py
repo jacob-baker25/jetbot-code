@@ -14,6 +14,7 @@ import re
 import shutil
 import signal
 import shlex
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -26,7 +27,6 @@ REPLAY_TOPICS_BASE = (
     "/scan_slam",
     "/odom_rf2o",
     "/tf",
-    "/tf_static",
 )
 
 
@@ -39,28 +39,20 @@ def replay_topics(odom_mode):
     return tuple(topics)
 
 
-def rosbag_record_command(path, topics):
+def replay_recorder_command(script, path, odom_mode):
+    topics = replay_topics(odom_mode)
     if not topics or any(not topic.startswith("/") for topic in topics):
         raise ValueError("Replay topics must be absolute ROS topic names")
-    return "ros2 bag record -o {} {}".format(
-        shlex.quote(str(path)), " ".join(shlex.quote(topic) for topic in topics))
+    return "python3 -u {} --output {} --odom-mode {}".format(
+        shlex.quote(str(script)), shlex.quote(str(path)), shlex.quote(odom_mode))
 
 
-def check_rosbag_cli():
-    """Fail before hardware startup if the Eloquent rosbag CLI is unavailable."""
-    subprocess.check_call(
-        ["ros2", "bag", "record", "--help"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=20,
-    )
-
-
-def require_rosbag_ready(log, topics):
-    """Require rosbag2 to finish discovery before the operator may move."""
-    if "All requested topics are subscribed" not in log:
-        raise RuntimeError("Replay recorder did not finish topic discovery")
-    missing = [topic for topic in topics if topic not in log]
+def require_replay_ready(log, topics):
+    """Require the passive recorder to receive every topic before movement."""
+    if "REPLAY_RECORDER_READY version=1" not in log:
+        raise RuntimeError("Replay recorder did not report ready")
+    seen = set(re.findall(r"REPLAY_TOPIC_FIRST topic=(/\S+)", log))
+    missing = [topic for topic in topics if topic not in seen]
     if missing:
         raise RuntimeError("Replay recorder did not report topics: " + ", ".join(missing))
 
@@ -73,38 +65,55 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def finalize_replay_capture(bag_directory, archive_path, info_path):
-    """Validate and archive an external RAM bag without placing it on eMMC."""
-    if not bag_directory.is_dir():
-        raise RuntimeError("Replay bag directory was not created: " + str(bag_directory))
-    files = sorted(path for path in bag_directory.rglob("*") if path.is_file())
-    database_files = [path for path in files if path.suffix == ".db3" and path.stat().st_size]
-    if not database_files:
-        raise RuntimeError("Replay bag has no nonempty sqlite3 database")
-    info = subprocess.check_output(
-        ["ros2", "bag", "info", str(bag_directory)],
-        universal_newlines=True,
-        stderr=subprocess.STDOUT,
-        timeout=30,
-    )
-    if "Messages:" not in info or "Topic information:" not in info:
-        raise RuntimeError("ros2 bag info did not report messages and topics")
-    info_path.write_text(info, encoding="utf-8")
+def finalize_replay_capture(capture_directory, archive_path, info_path, topics):
+    """Validate and archive an external RAM replay database without eMMC I/O."""
+    if not capture_directory.is_dir():
+        raise RuntimeError("Replay capture directory was not created: " + str(capture_directory))
+    database = capture_directory / "capture.sqlite3"
+    summary_path = capture_directory / "summary.json"
+    if not database.is_file() or not database.stat().st_size or not summary_path.is_file():
+        raise RuntimeError("Replay capture database or summary is missing/empty")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if summary.get("version") != 1 or summary.get("drops") != 0 or summary.get("writer_errors"):
+        raise RuntimeError("Replay recorder reported drops, writer errors, or wrong version")
+    connection = sqlite3.connect(str(database))
+    try:
+        rows = dict(connection.execute(
+            "SELECT topic, COUNT(*) FROM messages GROUP BY topic").fetchall())
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+    finally:
+        connection.close()
+    if integrity != "ok":
+        raise RuntimeError("Replay sqlite integrity check failed: " + str(integrity))
+    missing = [topic for topic in topics if rows.get(topic, 0) <= 0]
+    if missing:
+        raise RuntimeError("Replay database has no messages for: " + ", ".join(missing))
+    info = {
+        "version": 1,
+        "database": str(database),
+        "database_bytes": database.stat().st_size,
+        "topic_counts": rows,
+        "recorder_summary": summary,
+        "integrity_check": integrity,
+    }
+    write_json(info_path, info)
+    files = sorted(path for path in capture_directory.rglob("*") if path.is_file())
     with archive_path.open("xb") as stream:
         with tarfile.open(fileobj=stream, mode="w:gz") as archive:
-            archive.add(str(bag_directory), arcname=bag_directory.name)
+            archive.add(str(capture_directory), arcname=capture_directory.name)
     with tarfile.open(str(archive_path), "r:gz") as archive:
         members = archive.getmembers()
-        if not any(member.name.endswith(".db3") and member.size for member in members):
+        if not any(member.name.endswith("capture.sqlite3") and member.size for member in members):
             raise RuntimeError("Replay archive validation failed")
     return {
         "status": "complete",
-        "directory": str(bag_directory),
+        "directory": str(capture_directory),
         "archive": str(archive_path),
         "archive_bytes": archive_path.stat().st_size,
         "archive_sha256": sha256_file(archive_path),
         "file_count": len(files),
-        "database_bytes": sum(path.stat().st_size for path in database_files),
+        "database_bytes": database.stat().st_size,
+        "topic_counts": rows,
     }
 
 
@@ -503,7 +512,15 @@ def main():
     parser.add_argument('--source-git-head', default=None,
                         help='Pinned 40-hex source commit for an exported source snapshot')
     parser.add_argument('--record-replay', action='store_true',
-                        help='Record a passive rosbag2 replay dataset in /dev/shm; never writes it to eMMC')
+                        help='Record a passive SQLite replay dataset in /dev/shm; never writes it to eMMC')
+    parser.add_argument('--laser-x', type=float, default=0.0,
+                        help='Laser forward offset from base_link in meters; tested default 0.0')
+    parser.add_argument('--laser-y', type=float, default=0.0,
+                        help='Laser left offset from base_link in meters; tested default 0.0')
+    parser.add_argument('--laser-z', type=float, default=0.1778,
+                        help='Laser height above base_link in meters; tested default 0.1778')
+    parser.add_argument('--laser-yaw', type=float, default=math.pi,
+                        help='Laser yaw from base_link in radians; tested scan-convention default pi')
     parser.add_argument('--turn-speed', type=float, default=0.18,
                         help='Initial in-place turn motor command, 0.08..0.30; [ and ] adjust it live')
     args = parser.parse_args()
@@ -511,6 +528,13 @@ def main():
         parser.error('--lidar-input-scans must be 0..1200')
     if not math.isfinite(args.turn_speed) or not 0.08 <= args.turn_speed <= 0.30:
         parser.error('--turn-speed must be finite and within 0.08..0.30')
+    for label, value, lower, upper in (
+            ('--laser-x', args.laser_x, -1.0, 1.0),
+            ('--laser-y', args.laser_y, -1.0, 1.0),
+            ('--laser-z', args.laser_z, 0.0, 2.0),
+            ('--laser-yaw', args.laser_yaw, -2.0 * math.pi, 2.0 * math.pi)):
+        if not math.isfinite(value) or not lower <= value <= upper:
+            parser.error('{} must be finite and within {}..{}'.format(label, lower, upper))
     if args.source_git_head is not None and not re.match(
             r'^[0-9a-fA-F]{40}$', args.source_git_head):
         parser.error('--source-git-head must be exactly 40 hexadecimal characters')
@@ -521,8 +545,6 @@ def main():
         subprocess.check_call([sys.executable, str(package/'local_nodes/lidar_serial_reader.py'),
                                '--check-batched-driver'], timeout=20)
     check_rcl_logging(args.rf2o_log_level)
-    if args.record_replay:
-        check_rosbag_cli()
     output = Path.home() / "autochair_ros2_ws" / "experiments"
     output.mkdir(parents=True, exist_ok=True)
     target = output / (args.name + "_bundle.tar.gz")
@@ -551,6 +573,10 @@ def main():
                 "lidar_input_scans": args.lidar_input_scans,
                 "record_replay": args.record_replay,
                 "replay_topics": list(topics) if args.record_replay else [],
+                "laser_transform": {
+                    "x_m": args.laser_x, "y_m": args.laser_y,
+                    "z_m": args.laser_z, "yaw_rad": args.laser_yaw,
+                },
                 "matcher_profile": args.matcher_profile,
                 "initial_turn_speed": args.turn_speed,
                 "start_unix": time.time(), "source_sha256": hashes,
@@ -581,16 +607,21 @@ def main():
         import mapping_session as session
         session.LOCAL_NODES = str(root / "sources")
         session.EXPERIMENT_ROOT = str(root / "sessions")
+        session.LASER_X = args.laser_x
+        session.LASER_Y = args.laser_y
+        session.LASER_Z = args.laser_z
+        session.LASER_YAW = args.laser_yaw
         base = session.MappingSession
 
         class TrialSession(base):
             def start_stack(self):
                 super(TrialSession, self).start_stack()
                 if args.record_replay:
-                    command = rosbag_record_command(replay_bag, topics)
+                    command = replay_recorder_command(
+                        root / 'sources' / 'replay_recorder.py', replay_bag, args.odom)
                     manifest['replay_command'] = command
                     write_json(root / 'trial_manifest.json', manifest)
-                    self.start_process('rosbag', command)
+                    self.start_process('replay_recorder', command)
 
             def start_process(self, name, command):
                 if name == 'lidar':
@@ -621,8 +652,8 @@ def main():
                                             args.rf2o_deadband)
                     print('RF2O estimate policy: PASS; deadband='+args.rf2o_deadband, flush=True)
                 if args.record_replay:
-                    require_rosbag_ready(
-                        Path(self.process_log_paths['rosbag']).read_text(errors='replace'),
+                    require_replay_ready(
+                        Path(self.process_log_paths['replay_recorder']).read_text(errors='replace'),
                         topics)
                     print('Replay recorder: PASS; all requested topics subscribed', flush=True)
                 return True
@@ -675,7 +706,7 @@ def main():
         if args.record_replay:
             try:
                 manifest["replay_capture"] = finalize_replay_capture(
-                    replay_bag, replay_archive, root / "rosbag_info.txt")
+                    replay_bag, replay_archive, root / "replay_capture_info.json", topics)
                 print("Replay archive: {}\nReplay SHA256: {}".format(
                     replay_archive, manifest["replay_capture"]["archive_sha256"]),
                     flush=True)

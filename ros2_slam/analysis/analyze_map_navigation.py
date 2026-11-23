@@ -188,6 +188,7 @@ def parse_point(value):
 
 
 def analyze(yaml_path, robot_width, safety_margin, trajectory=None,
+            robot_length=0.22,
             start_world=None, goals_world=None):
     grid = OccupancyMap(yaml_path)
     clearance = robot_width / 2.0 + safety_margin
@@ -224,8 +225,11 @@ def analyze(yaml_path, robot_width, safety_margin, trajectory=None,
         "resolution_m": grid.config["resolution"],
         "cell_counts": counts,
         "robot_width_m": robot_width,
+        "robot_length_m": robot_length,
         "safety_margin_m": safety_margin,
         "required_center_clearance_m": clearance,
+        "straight_passage_minimum_m": robot_width + 2.0 * safety_margin,
+        "turning_clearance_evaluated": False,
         "inflation_radius_cells": radius_cells,
         "unknown_treated_as_blocked": True,
         "start_cell": list(start) if start is not None else None,
@@ -248,8 +252,9 @@ def analyze(yaml_path, robot_width, safety_margin, trajectory=None,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("map_yaml", type=Path)
-    parser.add_argument("--robot-width", type=float, required=True)
-    parser.add_argument("--safety-margin", type=float, required=True,
+    parser.add_argument("--robot-width", type=float, default=0.22)
+    parser.add_argument("--robot-length", type=float, default=0.22)
+    parser.add_argument("--safety-margin", type=float, default=0.05,
                         help="Additional clearance on each side of the robot")
     parser.add_argument("--trajectory", type=Path)
     parser.add_argument("--start", type=parse_point)
@@ -257,13 +262,14 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     for label, value in (("robot width", args.robot_width),
+                         ("robot length", args.robot_length),
                          ("safety margin", args.safety_margin)):
         if not math.isfinite(value) or value < 0:
             parser.error(label + " must be finite and nonnegative")
-    if args.robot_width == 0:
-        parser.error("robot width must be greater than zero")
+    if args.robot_width == 0 or args.robot_length == 0:
+        parser.error("robot width and length must be greater than zero")
     report = analyze(args.map_yaml, args.robot_width, args.safety_margin,
-                     args.trajectory, args.start, args.goal)
+                     args.trajectory, args.robot_length, args.start, args.goal)
     output = json.dumps(report, indent=2, allow_nan=False) + "\n"
     if args.output:
         args.output.write_text(output, encoding="utf-8")

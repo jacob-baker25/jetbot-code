@@ -44,6 +44,7 @@ class MapNavigationTest(unittest.TestCase):
             report = MAP.analyze(yaml, .18, 0, start_world=(.25, .35),
                                  goals_world=[(.65, .35)])
             self.assertFalse(report["goals"][0]["reachable"])
+            self.assertFalse(report["turning_clearance_evaluated"])
             json.dumps(report, allow_nan=False)
 
     def test_world_conversion_respects_pgm_vertical_axis(self):

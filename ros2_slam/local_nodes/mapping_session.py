@@ -61,6 +61,8 @@ LASER_FRAME = "laser_frame"
 # HARDWARE / TF
 # ============================================================
 
+LASER_X = 0.0
+LASER_Y = 0.0
 LASER_Z = 0.1778
 LASER_YAW = 3.14159265
 LIDAR_ANGLE_CONVENTION = "hardware_clockwise_to_ros_counterclockwise"
@@ -1001,10 +1003,12 @@ class MappingSession(Node):
             (
                 "ros2 run tf2_ros "
                 "static_transform_publisher "
-                "0.00 0.00 {} "
+                "{} {} {} "
                 "{} 0 0 "
                 "{} {}"
             ).format(
+                LASER_X,
+                LASER_Y,
                 LASER_Z,
                 LASER_YAW,
                 BASE_FRAME,
@@ -2494,6 +2498,14 @@ class MappingSession(Node):
 
                 "laser_z_m": (
                     LASER_Z
+                ),
+
+                "laser_x_m": (
+                    LASER_X
+                ),
+
+                "laser_y_m": (
+                    LASER_Y
                 ),
 
                 "laser_yaw_rad": (
