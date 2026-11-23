@@ -48,6 +48,16 @@ message stamps together onto the current ROS clock.  The original SLAM-owned
 a candidate matcher.  Keep `--rate 1.0` for qualification; faster playback is
 not evidence-equivalent until separately tested.
 
+The first end-to-end stationary replay regenerated the live map exactly: all
+9,768 occupancy pixels, map dimensions, origin, resolution, and occupancy
+counts matched.  The player nevertheless failed its conservative scheduling
+gate because 16 messages exceeded 0.25 seconds late (maximum 0.576 seconds).
+Treat map reproduction and scheduler qualification as separate gates.  The
+player now reports late bursts, sequence positions, topics, and percentile
+lateness so an identical second replay can distinguish a single startup or
+SLAM-processing stall from sustained replay overload before moving data is
+used for matcher comparisons.
+
 Do not combine the first recorder test with denser graph insertion, range
 clipping, timestamp changes, or motion. This is only a recorder qualification.
 

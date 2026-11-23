@@ -9,6 +9,7 @@ process.
 """
 import argparse
 import json
+import math
 from pathlib import Path
 import sqlite3
 import time
@@ -75,6 +76,76 @@ def set_quaternion(target, payload):
 
 def restore_finite_array(values):
     return [float("inf") if value is None else float(value) for value in values]
+
+
+def percentile(values, fraction):
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = int(math.ceil(fraction * len(ordered))) - 1
+    return ordered[max(0, min(index, len(ordered) - 1))]
+
+
+class LatenessTracker(object):
+    """Describe scheduler stalls without changing the replay cadence."""
+
+    def __init__(self, limit):
+        self.limit = float(limit)
+        self.values = []
+        self.topic_maximum = {}
+        self.topic_late_counts = {}
+        self.bursts = []
+        self.active = None
+
+    def observe(self, sequence, topic, relative_s, lateness_s):
+        lateness_s = float(lateness_s)
+        self.values.append(lateness_s)
+        self.topic_maximum[topic] = max(
+            lateness_s, self.topic_maximum.get(topic, 0.0))
+        if lateness_s <= self.limit:
+            self.close_burst()
+            return
+        self.topic_late_counts[topic] = self.topic_late_counts.get(topic, 0) + 1
+        if self.active is None:
+            self.active = {
+                "start_sequence": int(sequence),
+                "end_sequence": int(sequence),
+                "start_relative_s": float(relative_s),
+                "end_relative_s": float(relative_s),
+                "message_count": 0,
+                "start_topic": topic,
+                "maximum_lateness_s": lateness_s,
+                "maximum_sequence": int(sequence),
+                "maximum_topic": topic,
+            }
+        self.active["end_sequence"] = int(sequence)
+        self.active["end_relative_s"] = float(relative_s)
+        self.active["message_count"] += 1
+        if lateness_s > self.active["maximum_lateness_s"]:
+            self.active["maximum_lateness_s"] = lateness_s
+            self.active["maximum_sequence"] = int(sequence)
+            self.active["maximum_topic"] = topic
+
+    def close_burst(self):
+        if self.active is not None:
+            self.bursts.append(self.active)
+            self.active = None
+
+    def summary(self):
+        self.close_burst()
+        return {
+            "scheduled_messages": len(self.values),
+            "lateness_limit_s": self.limit,
+            "median_lateness_s": percentile(self.values, 0.50),
+            "p95_lateness_s": percentile(self.values, 0.95),
+            "p99_lateness_s": percentile(self.values, 0.99),
+            "maximum_lateness_s": max(self.values or [0.0]),
+            "late_messages": sum(self.topic_late_counts.values()),
+            "late_burst_count": len(self.bursts),
+            "late_counts_by_topic": self.topic_late_counts,
+            "maximum_lateness_by_topic_s": self.topic_maximum,
+            "late_bursts": self.bursts,
+        }
 
 
 def decode_laser_scan(payload, mapper):
@@ -228,8 +299,7 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
     connection = open_read_only(database)
     counts = {topic: 0 for topic in SLAM_INPUT_TOPICS}
     filtered_tf = 0
-    maximum_late = 0.0
-    late_messages = 0
+    timing = LatenessTracker(maximum_lateness)
     try:
         print(
             "REPLAY_PLAYER_READY version={} mode=slam_inputs rate={} rows={} "
@@ -242,18 +312,16 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
         mapper = StampMapper(metadata["first_receipt_unix"], start_unix, rate)
         print("REPLAY_PLAYER_START", flush=True)
         cursor = connection.execute(
-            "SELECT receipt_mono, topic, payload FROM messages "
+            "SELECT sequence, receipt_mono, topic, payload FROM messages "
             "WHERE topic IN ('/scan_slam','/odom_rf2o','/tf') ORDER BY sequence")
-        for receipt_mono, topic, encoded in cursor:
-            target = start_mono + (
-                float(receipt_mono) - metadata["first_receipt_mono"]) / rate
+        for sequence, receipt_mono, topic, encoded in cursor:
+            relative_s = float(receipt_mono) - metadata["first_receipt_mono"]
+            target = start_mono + relative_s / rate
             remaining = target - time.monotonic()
             if remaining > 0:
                 time.sleep(remaining)
             lateness = max(0.0, time.monotonic() - target)
-            maximum_late = max(maximum_late, lateness)
-            if lateness > maximum_lateness:
-                late_messages += 1
+            timing.observe(sequence, topic, relative_s, lateness)
             published = node.publish_payload(topic, json.loads(encoded), mapper)
             if published:
                 counts[topic] += 1
@@ -262,15 +330,19 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
         time.sleep(linger)
     finally:
         connection.close()
+    timing_summary = timing.summary()
+    for burst in timing_summary["late_bursts"]:
+        print("REPLAY_LATE_BURST " + json.dumps(burst, sort_keys=True), flush=True)
     summary = {
         "version": VERSION,
         "mode": "slam_inputs",
         "rate": float(rate),
         "published_counts": counts,
         "filtered_tf_messages": filtered_tf,
-        "maximum_lateness_s": maximum_late,
+        "maximum_lateness_s": timing_summary["maximum_lateness_s"],
         "lateness_limit_s": maximum_lateness,
-        "late_messages": late_messages,
+        "late_messages": timing_summary["late_messages"],
+        "timing": timing_summary,
     }
     print("REPLAY_PLAYER_SUMMARY " + json.dumps(summary, sort_keys=True), flush=True)
     return summary

@@ -168,6 +168,23 @@ class ReplayPlayerTest(unittest.TestCase):
         self.assertEqual(message.transforms[0].header.frame_id, "odom")
         self.assertEqual(message.transforms[0].child_frame_id, "base_link")
 
+    def test_lateness_tracker_groups_stalls_and_reports_topics(self):
+        tracker = self.player.LatenessTracker(.25)
+        tracker.observe(1, "/tf", 0., .01)
+        tracker.observe(2, "/scan_slam", 1., .30)
+        tracker.observe(3, "/tf", 1.01, .40)
+        tracker.observe(4, "/odom_rf2o", 1.02, .10)
+        tracker.observe(5, "/tf", 2., .26)
+        result = tracker.summary()
+        self.assertEqual(result["scheduled_messages"], 5)
+        self.assertEqual(result["late_messages"], 3)
+        self.assertEqual(result["late_burst_count"], 2)
+        self.assertEqual(result["late_counts_by_topic"], {
+            "/scan_slam": 1, "/tf": 2})
+        self.assertEqual(result["late_bursts"][0]["message_count"], 2)
+        self.assertEqual(result["late_bursts"][0]["maximum_sequence"], 3)
+        self.assertAlmostEqual(result["maximum_lateness_s"], .40)
+
 
 if __name__ == "__main__":
     unittest.main()
