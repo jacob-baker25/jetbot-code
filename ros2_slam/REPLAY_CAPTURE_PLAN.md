@@ -75,6 +75,14 @@ matching: the stationary input created only Karto state 0.  Preserve the first
 timing-failed replay as evidence, but do not use a replay with nonzero late
 messages in matcher comparisons.
 
+`run_replay_trial.py` packages the now-qualified manual procedure.  It refuses
+conflicting sensor/mapping processes and existing output names, verifies the
+selected overlay prefix and input hashes, owns the complete process groups for
+static TF and SLAM, enforces the player timing gate, saves the final map, and
+archives a machine-readable manifest even on failure.  Use this runner for
+moving baseline and one-factor candidate replays instead of pasting the manual
+multi-process shell sequence.
+
 Do not combine the first recorder test with denser graph insertion, range
 clipping, timestamp changes, or motion. This is only a recorder qualification.
 
