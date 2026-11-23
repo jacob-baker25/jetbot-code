@@ -33,6 +33,39 @@ def session_method(name, namespace):
 
 
 class HallwayTrialTest(unittest.TestCase):
+    def test_replay_topic_set_command_and_readiness(self):
+        topics = runner.replay_topics('imu_yaw')
+        self.assertIn('/scan', topics)
+        self.assertIn('/scan_slam', topics)
+        self.assertIn('/odom_rf2o_raw', topics)
+        self.assertNotIn('/odom_rf2o_raw', runner.replay_topics('rf2o'))
+        command = runner.rosbag_record_command(Path('/dev/shm/a b'), topics)
+        self.assertIn("ros2 bag record -o '/dev/shm/a b'", command)
+        log = "All requested topics are subscribed. Stopping discovery...\n" + "\n".join(topics)
+        runner.require_rosbag_ready(log, topics)
+        with self.assertRaises(RuntimeError):
+            runner.require_rosbag_ready(log.replace('/scan_slam', '/missing'), topics)
+        with self.assertRaises(ValueError):
+            runner.replay_topics('invalid')
+
+    def test_replay_capture_is_validated_and_archived_in_ram(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            bag = base / 'trial_replay_bag'; bag.mkdir()
+            (bag / 'metadata.yaml').write_text('metadata')
+            (bag / 'trial.db3').write_bytes(b'sqlite data')
+            archive = base / 'trial_replay_bag.tar.gz'
+            info_path = base / 'rosbag_info.txt'
+            info = 'Messages: 10\nTopic information: Topic: /scan\n'
+            with mock.patch.object(runner.subprocess, 'check_output', return_value=info):
+                result = runner.finalize_replay_capture(bag, archive, info_path)
+            self.assertEqual(result['status'], 'complete')
+            self.assertEqual(result['database_bytes'], len(b'sqlite data'))
+            self.assertEqual(result['archive_sha256'], runner.sha256_file(archive))
+            self.assertEqual(info_path.read_text(), info)
+            with tarfile.open(archive) as saved:
+                self.assertTrue(any(member.name.endswith('trial.db3') for member in saved))
+
     def test_source_commit_can_be_pinned_for_exported_snapshot(self):
         commit = 'A' * 40
         self.assertEqual(runner.resolve_source_git_head(ROOT, commit),
@@ -367,7 +400,8 @@ class HallwayTrialTest(unittest.TestCase):
 
     def test_python36_syntax(self):
         for path in [ROOT / 'run_hallway_trial.py', ROOT / 'local_nodes/motion_freshness.py',
-                     ROOT / 'local_nodes/mapping_session.py', ROOT / 'local_nodes/observe_imu_timing.py']:
+                     ROOT / 'local_nodes/mapping_session.py', ROOT / 'local_nodes/observe_imu_timing.py',
+                     ROOT / 'analysis/analyze_map_navigation.py']:
             source = path.read_text(encoding='utf8')
             if sys.version_info >= (3, 8):
                 ast.parse(source, feature_version=(3, 6))
