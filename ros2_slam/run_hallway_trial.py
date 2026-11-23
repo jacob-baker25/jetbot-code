@@ -534,8 +534,10 @@ def main():
     if shutil.disk_usage(str(output)).free < 64 * 1024 * 1024:
         parser.error("Need 64 MiB free at " + str(output))
     root = Path(tempfile.mkdtemp(prefix=args.name + "_", dir="/dev/shm"))
-    replay_bag = Path("/dev/shm") / (root.name + "_replay_bag")
-    replay_archive = Path("/dev/shm") / (root.name + "_replay_bag.tar.gz")
+    # Deterministic names make the separately retained RAM artifact easy to
+    # copy, while the no-overwrite checks still protect an earlier capture.
+    replay_bag = Path("/dev/shm") / (args.name + "_replay_bag")
+    replay_archive = Path("/dev/shm") / (args.name + "_replay_bag.tar.gz")
     topics = replay_topics(args.odom)
     if replay_bag.exists() or replay_archive.exists():
         parser.error("Replay output already exists in /dev/shm")
