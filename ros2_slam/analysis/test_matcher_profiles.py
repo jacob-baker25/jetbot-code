@@ -40,6 +40,19 @@ def scalar_yaml(path):
 
 
 class ProfilesTest(unittest.TestCase):
+    def test_heading025_candidate_changes_only_heading_threshold(self):
+        config_root = ROOT / "slam_toolbox/config"
+        strict = scalar_yaml(
+            config_root / "mapper_params_online_sync_guarded_strict.yaml")
+        heading025 = scalar_yaml(
+            config_root /
+            "mapper_params_online_sync_guarded_strict_heading025.yaml")
+        self.assertEqual(set(strict), set(heading025))
+        differences = {key for key in strict if strict[key] != heading025[key]}
+        self.assertEqual(differences, {"minimum_travel_heading"})
+        self.assertEqual(float(strict["minimum_travel_heading"]), 0.5)
+        self.assertEqual(float(heading025["minimum_travel_heading"]), 0.25)
+
     def test_range6_candidate_changes_only_maximum_laser_range(self):
         config_root = ROOT / "slam_toolbox/config"
         strict = scalar_yaml(

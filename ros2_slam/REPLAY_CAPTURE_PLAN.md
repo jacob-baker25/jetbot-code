@@ -109,6 +109,25 @@ candidate, not a new default: accept it only if transport timing still passes,
 trajectory closure is not degraded, and map coherence improves. Even if it
 passes at home, longer Evans Hall sight lines require a later held-out test.
 
+The 6.0 m range replay passed transport timing and preserved the strict
+matcher trajectory exactly: it made the same 12 accepted and 16 rejected
+decisions and ended at the same final pose. It reduced eight-connected
+occupied components from 262 to 237 and isolated occupied cells from 142 to
+125, but visual review showed the same central false ray fans with only their
+distant ends removed. This is consistent with the capture: only 2,773 of
+477,503 finite ranges (0.58%) exceeded 6.0 m. Keep this as a safe diagnostic,
+but do not promote it as the map-quality solution.
+
+The next candidate returns to the 12.0 m strict baseline and changes only
+`minimum_travel_heading`, from 0.5 rad (28.6 degrees) to 0.25 rad (14.3
+degrees). The map's most obvious false structures radiate from turning areas,
+and the baseline created only 29 Karto states over the complete route. This
+candidate should add intermediate turn keyframes without weakening the 0.05 m
+translation correction guard, changing range data, or increasing straight-line
+keyframe density. Replay will determine whether the added states improve wall
+continuity or instead add more motion-distorted scans. Reject it if scheduling,
+closure, matcher rejection behavior, or map coherence degrades.
+
 The laser transform remains configurable as `--laser-x`, `--laser-y`,
 `--laser-z`, and `--laser-yaw`. Their defaults exactly preserve the tested
 configuration (0, 0, 0.1778 m, pi rad); provisional measurements must not
