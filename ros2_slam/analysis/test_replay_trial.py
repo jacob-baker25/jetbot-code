@@ -57,6 +57,19 @@ class ReplayTrialTest(unittest.TestCase):
                 self.runner.sha256(run / "value.txt"),
                 "1e1f2c881ae0608ec77ebf88a75c66d3099113a7343238f2f7a0ebb91a4ed335")
 
+    def test_rotation_filter_argument_is_opt_in_and_bounded(self):
+        parser = self.runner.parser()
+        common = [
+            "run", "--source-git-head", "a" * 40,
+            "--database", "capture.sqlite3", "--overlay-root", "overlay",
+        ]
+        self.assertIsNone(parser.parse_args(common).maximum_scan_rotation_degrees)
+        self.assertEqual(
+            parser.parse_args(common + [
+                "--maximum-scan-rotation-degrees", "1.0"
+            ]).maximum_scan_rotation_degrees,
+            1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

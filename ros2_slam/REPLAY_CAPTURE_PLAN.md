@@ -128,6 +128,25 @@ keyframe density. Replay will determine whether the added states improve wall
 continuity or instead add more motion-distorted scans. Reject it if scheduling,
 closure, matcher rejection behavior, or map coherence degrades.
 
+The 0.25 rad heading candidate is rejected. It increased Karto states from 29
+to 34 and accepted corrections from 12 to 17, but its final pose moved about
+0.30 m and 17 degrees from the strict result. Occupied components increased
+from 262 to 301, isolated occupied cells increased from 142 to 173, and visual
+review showed additional radial structure. More turn keyframes therefore add
+bad evidence rather than repairing the map.
+
+The recorded scan timing supplies a stronger causal lead. A revolution takes
+a median 0.072 s. Interpolating the recorded IMU-yaw odometry over each scan
+shows a p95 rotation of 4.09 degrees, a maximum of 6.74 degrees, and 203 of
+1,558 scans rotating by more than one degree during acquisition. At three
+meters, one degree already spans approximately one 0.05 m map cell. The next
+offline diagnostic keeps the exact strict mapper and suppresses only scans
+whose recorded acquisition interval rotated by more than one degree. The
+filter is opt-in in replay, reports its exact count and maximum observed
+rotation, and does not alter odometry or TF cadence. It is not yet a live
+sensor change; promote it to the delayed-scan node only if replay improves map
+coherence without degrading closure or scheduler timing.
+
 The laser transform remains configurable as `--laser-x`, `--laser-y`,
 `--laser-z`, and `--laser-yaw`. Their defaults exactly preserve the tested
 configuration (0, 0, 0.1778 m, pi rad); provisional measurements must not

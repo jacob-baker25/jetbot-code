@@ -8,6 +8,7 @@ replays the original SLAM-owned ``map -> odom`` transform into a candidate SLAM
 process.
 """
 import argparse
+import bisect
 import json
 import math
 from pathlib import Path
@@ -84,6 +85,95 @@ def percentile(values, fraction):
     ordered = sorted(values)
     index = int(math.ceil(fraction * len(ordered))) - 1
     return ordered[max(0, min(index, len(ordered) - 1))]
+
+
+def stamp_seconds(header):
+    return int(header["sec"]) + int(header["nanosec"]) / float(NANOSECONDS)
+
+
+def quaternion_yaw(value):
+    return math.atan2(
+        2.0 * (float(value["w"]) * float(value["z"])
+               + float(value["x"]) * float(value["y"])),
+        1.0 - 2.0 * (float(value["y"]) ** 2
+                     + float(value["z"]) ** 2))
+
+
+class ScanRotationFilter(object):
+    """Reject scans whose acquisition spans excessive recorded yaw motion."""
+
+    def __init__(self, samples, maximum_rotation):
+        if maximum_rotation <= 0:
+            raise ValueError("Maximum scan rotation must be positive")
+        if len(samples) < 2:
+            raise ReplayFormatError(
+                "Scan rotation filter requires at least two odometry samples")
+        ordered = sorted((float(stamp), float(yaw)) for stamp, yaw in samples)
+        self.times = [value[0] for value in ordered]
+        if any(current <= previous
+               for previous, current in zip(self.times, self.times[1:])):
+            raise ReplayFormatError(
+                "Odometry stamps must increase for scan rotation filtering")
+        self.yaws = [ordered[0][1]]
+        previous_raw = ordered[0][1]
+        for unused_stamp, current_raw in ordered[1:]:
+            delta = math.atan2(
+                math.sin(current_raw - previous_raw),
+                math.cos(current_raw - previous_raw))
+            self.yaws.append(self.yaws[-1] + delta)
+            previous_raw = current_raw
+        self.maximum_rotation = float(maximum_rotation)
+        self.observed = 0
+        self.filtered = 0
+        self.maximum_observed_rotation = 0.0
+
+    @classmethod
+    def from_connection(cls, connection, maximum_rotation):
+        samples = []
+        for encoded, in connection.execute(
+                "SELECT payload FROM messages WHERE topic='/odom_rf2o' "
+                "ORDER BY sequence"):
+            payload = json.loads(encoded)
+            samples.append((stamp_seconds(payload["header"]),
+                            quaternion_yaw(payload["orientation"])))
+        return cls(samples, maximum_rotation)
+
+    def interpolate_yaw(self, stamp):
+        upper = bisect.bisect_left(self.times, stamp)
+        if upper == 0:
+            return self.yaws[0]
+        if upper == len(self.times):
+            return self.yaws[-1]
+        lower = upper - 1
+        ratio = ((stamp - self.times[lower])
+                 / (self.times[upper] - self.times[lower]))
+        return self.yaws[lower] + ratio * (self.yaws[upper] - self.yaws[lower])
+
+    def rotation(self, scan_payload):
+        start = stamp_seconds(scan_payload["header"])
+        end = start + float(scan_payload["scan_time"])
+        return abs(self.interpolate_yaw(end) - self.interpolate_yaw(start))
+
+    def keep(self, scan_payload):
+        rotation = self.rotation(scan_payload)
+        self.observed += 1
+        self.maximum_observed_rotation = max(
+            self.maximum_observed_rotation, rotation)
+        if rotation > self.maximum_rotation:
+            self.filtered += 1
+            return False
+        return True
+
+    def summary(self):
+        return {
+            "maximum_rotation_rad": self.maximum_rotation,
+            "maximum_rotation_deg": math.degrees(self.maximum_rotation),
+            "maximum_observed_rotation_rad": self.maximum_observed_rotation,
+            "maximum_observed_rotation_deg": math.degrees(
+                self.maximum_observed_rotation),
+            "observed_scans": self.observed,
+            "filtered_scans": self.filtered,
+        }
 
 
 class LatenessTracker(object):
@@ -294,13 +384,17 @@ class ReplayPlayer(Node):
 
 
 def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
-           maximum_lateness=0.25):
+           maximum_lateness=0.25, maximum_scan_rotation=None):
     metadata = validate_database(database)
     connection = open_read_only(database)
     counts = {topic: 0 for topic in SLAM_INPUT_TOPICS}
     filtered_tf = 0
     timing = LatenessTracker(maximum_lateness)
+    rotation_filter = None
     try:
+        if maximum_scan_rotation is not None:
+            rotation_filter = ScanRotationFilter.from_connection(
+                connection, maximum_scan_rotation)
         print(
             "REPLAY_PLAYER_READY version={} mode=slam_inputs rate={} rows={} "
             "duration_s={:.3f}".format(
@@ -322,7 +416,11 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
                 time.sleep(remaining)
             lateness = max(0.0, time.monotonic() - target)
             timing.observe(sequence, topic, relative_s, lateness)
-            published = node.publish_payload(topic, json.loads(encoded), mapper)
+            payload = json.loads(encoded)
+            if (topic == "/scan_slam" and rotation_filter is not None
+                    and not rotation_filter.keep(payload)):
+                continue
+            published = node.publish_payload(topic, payload, mapper)
             if published:
                 counts[topic] += 1
             elif topic == "/tf":
@@ -343,6 +441,8 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
         "lateness_limit_s": maximum_lateness,
         "late_messages": timing_summary["late_messages"],
         "timing": timing_summary,
+        "scan_rotation_filter": (
+            rotation_filter.summary() if rotation_filter is not None else None),
     }
     print("REPLAY_PLAYER_SUMMARY " + json.dumps(summary, sort_keys=True), flush=True)
     return summary
@@ -355,11 +455,15 @@ def main(args=None):
     parser.add_argument("--start-delay", type=float, default=2.0)
     parser.add_argument("--linger", type=float, default=1.0)
     parser.add_argument("--maximum-lateness", type=float, default=0.25)
+    parser.add_argument("--maximum-scan-rotation-degrees", type=float)
     parsed = parser.parse_args(args)
     if parsed.rate <= 0 or parsed.start_delay < 0 or parsed.linger < 0:
         parser.error("rate must be positive; delays must be nonnegative")
     if parsed.maximum_lateness <= 0:
         parser.error("maximum lateness must be positive")
+    if (parsed.maximum_scan_rotation_degrees is not None
+            and not 0 < parsed.maximum_scan_rotation_degrees <= 180):
+        parser.error("maximum scan rotation must be in (0, 180] degrees")
 
     metadata = validate_database(parsed.database)
     if metadata["duration_s"] / parsed.rate > 3600:
@@ -369,7 +473,9 @@ def main(args=None):
     try:
         summary = replay(
             parsed.database, node, parsed.rate, parsed.start_delay,
-            parsed.linger, parsed.maximum_lateness)
+            parsed.linger, parsed.maximum_lateness,
+            (math.radians(parsed.maximum_scan_rotation_degrees)
+             if parsed.maximum_scan_rotation_degrees is not None else None))
     except KeyboardInterrupt:
         return 130
     finally:

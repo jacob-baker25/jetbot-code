@@ -185,6 +185,26 @@ class ReplayPlayerTest(unittest.TestCase):
         self.assertEqual(result["late_bursts"][0]["maximum_sequence"], 3)
         self.assertAlmostEqual(result["maximum_lateness_s"], .40)
 
+    def test_scan_rotation_filter_interpolates_yaw_and_handles_wrap(self):
+        samples = [
+            (0., math.radians(170.)),
+            (1., math.radians(-170.)),
+            (2., math.radians(-150.)),
+        ]
+        rotation_filter = self.player.ScanRotationFilter(
+            samples, math.radians(1.5))
+        scan = {
+            "header": {"sec": 0, "nanosec": 500000000},
+            "scan_time": .1,
+        }
+        self.assertAlmostEqual(
+            math.degrees(rotation_filter.rotation(scan)), 2.0, places=6)
+        self.assertFalse(rotation_filter.keep(scan))
+        summary = rotation_filter.summary()
+        self.assertEqual(summary["observed_scans"], 1)
+        self.assertEqual(summary["filtered_scans"], 1)
+        self.assertAlmostEqual(summary["maximum_observed_rotation_deg"], 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -204,6 +204,7 @@ def parser():
     result.add_argument("--gate-mode", default="euclidean_heading")
     result.add_argument("--rate", type=float, default=1.0)
     result.add_argument("--maximum-lateness", type=float, default=0.25)
+    result.add_argument("--maximum-scan-rotation-degrees", type=float)
     result.add_argument("--laser-x", type=float, default=0.0)
     result.add_argument("--laser-y", type=float, default=0.0)
     result.add_argument("--laser-z", type=float, default=0.1778)
@@ -215,6 +216,9 @@ def main(args=None):
     parsed = parser().parse_args(args)
     if parsed.rate <= 0 or parsed.maximum_lateness <= 0:
         parser().error("rate and maximum lateness must be positive")
+    if (parsed.maximum_scan_rotation_degrees is not None
+            and not 0 < parsed.maximum_scan_rotation_degrees <= 180):
+        parser().error("maximum scan rotation must be in (0, 180] degrees")
 
     database = parsed.database.resolve()
     params = parsed.params_file.resolve()
@@ -261,6 +265,7 @@ def main(args=None):
         "gate_mode": parsed.gate_mode,
         "rate": parsed.rate,
         "maximum_lateness_s": parsed.maximum_lateness,
+        "maximum_scan_rotation_degrees": parsed.maximum_scan_rotation_degrees,
         "laser_transform": {
             "x": parsed.laser_x,
             "y": parsed.laser_y,
@@ -296,15 +301,21 @@ def main(args=None):
         if not ros_node_ready(slam_process):
             raise ReplayTrialError("SLAM node did not become ready")
 
-        player_rc, player_text = stream_process(
-            [
+        player_command = [
                 "python3", str(ROOT / "local_nodes" / "replay_player.py"),
                 "--database", str(database),
                 "--rate", str(parsed.rate),
                 "--start-delay", "3",
                 "--linger", "2",
                 "--maximum-lateness", str(parsed.maximum_lateness),
-            ],
+            ]
+        if parsed.maximum_scan_rotation_degrees is not None:
+            player_command.extend([
+                "--maximum-scan-rotation-degrees",
+                str(parsed.maximum_scan_rotation_degrees),
+            ])
+        player_rc, player_text = stream_process(
+            player_command,
             output / "player.log")
         player_summary = parse_player_summary(player_text)
 
