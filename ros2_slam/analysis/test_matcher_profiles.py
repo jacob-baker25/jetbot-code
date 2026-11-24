@@ -40,6 +40,18 @@ def scalar_yaml(path):
 
 
 class ProfilesTest(unittest.TestCase):
+    def test_range6_candidate_changes_only_maximum_laser_range(self):
+        config_root = ROOT / "slam_toolbox/config"
+        strict = scalar_yaml(
+            config_root / "mapper_params_online_sync_guarded_strict.yaml")
+        range6 = scalar_yaml(
+            config_root / "mapper_params_online_sync_guarded_strict_range6.yaml")
+        self.assertEqual(set(strict), set(range6))
+        differences = {key for key in strict if strict[key] != range6[key]}
+        self.assertEqual(differences, {"max_laser_range"})
+        self.assertEqual(float(strict["max_laser_range"]), 12.0)
+        self.assertEqual(float(range6["max_laser_range"]), 6.0)
+
     def test_profiles_match_effective_defaults_and_only_width_differs(self):
         profiles = {}
         for name, filename in PROFILE_FILES.items():

@@ -86,6 +86,29 @@ multi-process shell sequence.
 Do not combine the first recorder test with denser graph insertion, range
 clipping, timestamp changes, or motion. This is only a recorder qualification.
 
+## First moving one-factor comparisons
+
+The qualified closed-L moving capture also reproduced exactly under replay:
+all 55,357 occupancy pixels, dimensions, origin, and resolution matched the
+live `guarded_strict` map. Replay scheduled 9,676 selected events with zero
+late messages and a maximum lateness of 0.124 s. This makes the capture usable
+for controlled, one-factor map-quality comparisons.
+
+Relaxing `sequential_match_maximum_translation` from 0.05 m to 0.12 m is
+rejected. It accepted two more sequential matches, but shifted the final Karto
+pose by about 0.19 m and reduced occupied-cell coherence: connected components
+increased from 262 to 284, isolated occupied cells increased from 142 to 150,
+and occupied cells with at least two four-connected neighbors fell from 1,075
+to 964. Physical closure alone therefore does not justify the relaxation.
+
+The next replay keeps the qualified 0.05 m motion guard and changes only
+`max_laser_range`, from 12.0 m to 6.0 m. The route legs are about 1.8 m, so
+6.0 m retains ample local wall geometry while directly testing whether distant
+returns contribute to the false rays and fragmented walls. This is an offline
+candidate, not a new default: accept it only if transport timing still passes,
+trajectory closure is not degraded, and map coherence improves. Even if it
+passes at home, longer Evans Hall sight lines require a later held-out test.
+
 The laser transform remains configurable as `--laser-x`, `--laser-y`,
 `--laser-z`, and `--laser-yaw`. Their defaults exactly preserve the tested
 configuration (0, 0, 0.1778 m, pi rad); provisional measurements must not
