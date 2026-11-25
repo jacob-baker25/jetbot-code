@@ -136,9 +136,11 @@ review showed additional radial structure. More turn keyframes therefore add
 bad evidence rather than repairing the map.
 
 The recorded scan timing supplies a stronger causal lead. A revolution takes
-a median 0.072 s. Interpolating the recorded IMU-yaw odometry over each scan
-shows a p95 rotation of 4.09 degrees, a maximum of 6.74 degrees, and 203 of
-1,558 scans rotating by more than one degree during acquisition. At three
+a median 0.072 s. The bridge stamps a scan when its completed revolution is
+published, so its acquisition interval is `[stamp - scan_time, stamp]`.
+Interpolating the recorded IMU-yaw odometry over that interval shows a p95
+rotation of 4.08 degrees, a maximum of 5.70 degrees, and 205 of 1,558 scans
+rotating by more than one degree during acquisition. At three
 meters, one degree already spans approximately one 0.05 m map cell. The next
 offline diagnostic keeps the exact strict mapper and suppresses only scans
 whose recorded acquisition interval rotated by more than one degree. The
@@ -146,6 +148,15 @@ filter is opt-in in replay, reports its exact count and maximum observed
 rotation, and does not alter odometry or TF cadence. It is not yet a live
 sensor change; promote it to the delayed-scan node only if replay improves map
 coherence without degrading closure or scheduler timing.
+
+The initial 1, 2, and 3 degree replay sweep mistakenly evaluated the interval
+after the publication stamp. It still selected turning scans and produced a
+useful qualitative result—every threshold removed the accepted turn
+corrections and reduced radial artifacts—but those runs are not exact filter
+qualification. The corrected preceding interval changes the counts only
+slightly (205, 161, and 121 scans respectively), but requires one exact repeat
+before any live change. Do not continue the threshold sweep: its central
+finding is already stable, and discarding turn scans sacrifices scan matching.
 
 The laser transform remains configurable as `--laser-x`, `--laser-y`,
 `--laser-z`, and `--laser-yaw`. Their defaults exactly preserve the tested

@@ -188,13 +188,14 @@ class ReplayPlayerTest(unittest.TestCase):
     def test_scan_rotation_filter_interpolates_yaw_and_handles_wrap(self):
         samples = [
             (0., math.radians(170.)),
+            (.5, math.radians(170.)),
+            (.6, math.radians(172.)),
             (1., math.radians(-170.)),
-            (2., math.radians(-150.)),
         ]
         rotation_filter = self.player.ScanRotationFilter(
             samples, math.radians(1.5))
         scan = {
-            "header": {"sec": 0, "nanosec": 500000000},
+            "header": {"sec": 0, "nanosec": 600000000},
             "scan_time": .1,
         }
         self.assertAlmostEqual(

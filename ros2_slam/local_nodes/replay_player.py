@@ -150,8 +150,11 @@ class ScanRotationFilter(object):
         return self.yaws[lower] + ratio * (self.yaws[upper] - self.yaws[lower])
 
     def rotation(self, scan_payload):
-        start = stamp_seconds(scan_payload["header"])
-        end = start + float(scan_payload["scan_time"])
+        # The current bridge stamps at publication after iter_scans() has
+        # returned a complete revolution, so the captured interval ends at
+        # the header stamp rather than beginning there.
+        end = stamp_seconds(scan_payload["header"])
+        start = end - float(scan_payload["scan_time"])
         return abs(self.interpolate_yaw(end) - self.interpolate_yaw(start))
 
     def keep(self, scan_payload):
