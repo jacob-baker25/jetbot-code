@@ -109,3 +109,20 @@ diagnostic, not the production solution.
 Every candidate run records the source commit, database and parameter hashes,
 laser transform, deskew flag, timing diagnostics, logs, map hashes, and archive
 hash.  Baselines are retained and never overwritten.
+
+## First replay decision (2026-11-24)
+
+The first same-data deskew replay was technically valid but did not pass the
+navigation-quality gate.  Relative to the strict baseline, endpoint fragments
+and isolated occupied pixels decreased modestly and closure was preserved, but
+the false wall remained, accepted scan corrections fell from 12 to 11, and the
+largest region retaining 0.16 m obstacle clearance decreased from about
+2.98 m2 to 2.33 m2.  Live deskew and scan-time parameter sweeps are therefore
+paused.
+
+The next bounded step is endpoint source attribution on the existing capture.
+It will compare outbound, turnaround, and return observations and separate
+stationary, translating, and turning scans.  This determines whether the false
+structure is tied to turn timing, disagreement between route passes, persistent
+sensor geometry, or a short-lived obstacle before another algorithm or physical
+experiment is authorized.
