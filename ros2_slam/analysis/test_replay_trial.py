@@ -69,6 +69,13 @@ class ReplayTrialTest(unittest.TestCase):
                 "--maximum-scan-rotation-degrees", "1.0"
             ]).maximum_scan_rotation_degrees,
             1.0)
+        self.assertIsNone(
+            parser.parse_args(common).maximum_scan_translation_meters)
+        self.assertEqual(
+            parser.parse_args(common + [
+                "--maximum-scan-translation-meters", "0.003"
+            ]).maximum_scan_translation_meters,
+            0.003)
         self.assertFalse(parser.parse_args(common).deskew_scans)
         self.assertTrue(parser.parse_args(common + ["--deskew-scans"]).deskew_scans)
 

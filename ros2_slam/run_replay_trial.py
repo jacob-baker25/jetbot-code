@@ -205,6 +205,7 @@ def parser():
     result.add_argument("--rate", type=float, default=1.0)
     result.add_argument("--maximum-lateness", type=float, default=0.25)
     result.add_argument("--maximum-scan-rotation-degrees", type=float)
+    result.add_argument("--maximum-scan-translation-meters", type=float)
     result.add_argument("--deskew-scans", action="store_true")
     result.add_argument("--laser-x", type=float, default=0.0)
     result.add_argument("--laser-y", type=float, default=0.0)
@@ -220,9 +221,13 @@ def main(args=None):
     if (parsed.maximum_scan_rotation_degrees is not None
             and not 0 < parsed.maximum_scan_rotation_degrees <= 180):
         parser().error("maximum scan rotation must be in (0, 180] degrees")
-    if (parsed.deskew_scans
-            and parsed.maximum_scan_rotation_degrees is not None):
-        parser().error("deskew and scan-rotation filtering are mutually exclusive")
+    if (parsed.maximum_scan_translation_meters is not None
+            and not 0 < parsed.maximum_scan_translation_meters <= 1):
+        parser().error("maximum scan translation must be in (0, 1] meters")
+    if (parsed.deskew_scans and (
+            parsed.maximum_scan_rotation_degrees is not None
+            or parsed.maximum_scan_translation_meters is not None)):
+        parser().error("deskew and scan-motion filtering are mutually exclusive")
 
     database = parsed.database.resolve()
     params = parsed.params_file.resolve()
@@ -270,6 +275,8 @@ def main(args=None):
         "rate": parsed.rate,
         "maximum_lateness_s": parsed.maximum_lateness,
         "maximum_scan_rotation_degrees": parsed.maximum_scan_rotation_degrees,
+        "maximum_scan_translation_meters": (
+            parsed.maximum_scan_translation_meters),
         "deskew_scans": parsed.deskew_scans,
         "laser_transform": {
             "x": parsed.laser_x,
@@ -318,6 +325,11 @@ def main(args=None):
             player_command.extend([
                 "--maximum-scan-rotation-degrees",
                 str(parsed.maximum_scan_rotation_degrees),
+            ])
+        if parsed.maximum_scan_translation_meters is not None:
+            player_command.extend([
+                "--maximum-scan-translation-meters",
+                str(parsed.maximum_scan_translation_meters),
             ])
         if parsed.deskew_scans:
             player_command.extend([

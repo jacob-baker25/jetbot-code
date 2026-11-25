@@ -181,6 +181,63 @@ class ScanRotationFilter(object):
         }
 
 
+class ScanTranslationFilter(object):
+    """Reject scans whose acquisition spans excessive recorded translation."""
+
+    def __init__(self, timeline, maximum_translation):
+        if maximum_translation <= 0:
+            raise ValueError("Maximum scan translation must be positive")
+        self.timeline = timeline
+        self.maximum_translation = float(maximum_translation)
+        self.observed = 0
+        self.filtered = 0
+        self.scans_without_coverage = 0
+        self.maximum_observed_translation = 0.0
+
+    @classmethod
+    def from_connection(cls, connection, maximum_translation):
+        return cls(
+            PoseTimeline(pose_samples_from_connection(connection)),
+            maximum_translation)
+
+    def translation(self, scan_payload):
+        # The bridge stamps a completed revolution, so its acquisition
+        # interval ends at the LaserScan header stamp.
+        end = stamp_seconds(scan_payload["header"])
+        start = end - float(scan_payload["scan_time"])
+        if not self.timeline.covers(start, end):
+            return None
+        start_pose = self.timeline.interpolate(start)
+        end_pose = self.timeline.interpolate(end)
+        return math.hypot(
+            end_pose[0] - start_pose[0], end_pose[1] - start_pose[1])
+
+    def keep(self, scan_payload):
+        translation = self.translation(scan_payload)
+        self.observed += 1
+        if translation is None:
+            # Retain uncovered boundary scans rather than silently discarding
+            # data we cannot classify. The summary makes this visible.
+            self.scans_without_coverage += 1
+            return True
+        self.maximum_observed_translation = max(
+            self.maximum_observed_translation, translation)
+        if translation > self.maximum_translation:
+            self.filtered += 1
+            return False
+        return True
+
+    def summary(self):
+        return {
+            "maximum_translation_m": self.maximum_translation,
+            "maximum_observed_translation_m": (
+                self.maximum_observed_translation),
+            "observed_scans": self.observed,
+            "filtered_scans": self.filtered,
+            "scans_without_coverage": self.scans_without_coverage,
+        }
+
+
 class LatenessTracker(object):
     """Describe scheduler stalls without changing the replay cadence."""
 
@@ -390,7 +447,8 @@ class ReplayPlayer(Node):
 
 def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
            maximum_lateness=0.25, maximum_scan_rotation=None,
-           deskew_scans=False, laser_x=0.0, laser_y=0.0,
+           maximum_scan_translation=None, deskew_scans=False,
+           laser_x=0.0, laser_y=0.0,
            laser_yaw=math.pi):
     metadata = validate_database(database)
     connection = open_read_only(database)
@@ -398,11 +456,15 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
     filtered_tf = 0
     timing = LatenessTracker(maximum_lateness)
     rotation_filter = None
+    translation_filter = None
     deskewer = None
     try:
         if maximum_scan_rotation is not None:
             rotation_filter = ScanRotationFilter.from_connection(
                 connection, maximum_scan_rotation)
+        if maximum_scan_translation is not None:
+            translation_filter = ScanTranslationFilter.from_connection(
+                connection, maximum_scan_translation)
         if deskew_scans:
             deskewer = ScanDeskewer(
                 PoseTimeline(pose_samples_from_connection(connection)),
@@ -429,9 +491,16 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
             lateness = max(0.0, time.monotonic() - target)
             timing.observe(sequence, topic, relative_s, lateness)
             payload = json.loads(encoded)
-            if (topic == "/scan_slam" and rotation_filter is not None
-                    and not rotation_filter.keep(payload)):
-                continue
+            if topic == "/scan_slam":
+                keep_scan = True
+                if (rotation_filter is not None
+                        and not rotation_filter.keep(payload)):
+                    keep_scan = False
+                if (translation_filter is not None
+                        and not translation_filter.keep(payload)):
+                    keep_scan = False
+                if not keep_scan:
+                    continue
             if topic == "/scan_slam" and deskewer is not None:
                 payload = deskewer.deskew(payload)
             published = node.publish_payload(topic, payload, mapper)
@@ -457,6 +526,9 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
         "timing": timing_summary,
         "scan_rotation_filter": (
             rotation_filter.summary() if rotation_filter is not None else None),
+        "scan_translation_filter": (
+            translation_filter.summary()
+            if translation_filter is not None else None),
         "scan_deskew": (
             deskewer.summary() if deskewer is not None else None),
     }
@@ -472,6 +544,7 @@ def main(args=None):
     parser.add_argument("--linger", type=float, default=1.0)
     parser.add_argument("--maximum-lateness", type=float, default=0.25)
     parser.add_argument("--maximum-scan-rotation-degrees", type=float)
+    parser.add_argument("--maximum-scan-translation-meters", type=float)
     parser.add_argument("--deskew-scans", action="store_true")
     parser.add_argument("--laser-x", type=float, default=0.0)
     parser.add_argument("--laser-y", type=float, default=0.0)
@@ -484,9 +557,13 @@ def main(args=None):
     if (parsed.maximum_scan_rotation_degrees is not None
             and not 0 < parsed.maximum_scan_rotation_degrees <= 180):
         parser.error("maximum scan rotation must be in (0, 180] degrees")
-    if (parsed.deskew_scans
-            and parsed.maximum_scan_rotation_degrees is not None):
-        parser.error("deskew and scan-rotation filtering are mutually exclusive")
+    if (parsed.maximum_scan_translation_meters is not None
+            and not 0 < parsed.maximum_scan_translation_meters <= 1):
+        parser.error("maximum scan translation must be in (0, 1] meters")
+    if (parsed.deskew_scans and (
+            parsed.maximum_scan_rotation_degrees is not None
+            or parsed.maximum_scan_translation_meters is not None)):
+        parser.error("deskew and scan-motion filtering are mutually exclusive")
 
     metadata = validate_database(parsed.database)
     if metadata["duration_s"] / parsed.rate > 3600:
@@ -499,6 +576,7 @@ def main(args=None):
             parsed.linger, parsed.maximum_lateness,
             (math.radians(parsed.maximum_scan_rotation_degrees)
              if parsed.maximum_scan_rotation_degrees is not None else None),
+            parsed.maximum_scan_translation_meters,
             parsed.deskew_scans, parsed.laser_x, parsed.laser_y,
             parsed.laser_yaw)
     except KeyboardInterrupt:

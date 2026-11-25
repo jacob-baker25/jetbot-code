@@ -211,10 +211,53 @@ class ReplayPlayerTest(unittest.TestCase):
         self.assertEqual(summary["filtered_scans"], 1)
         self.assertAlmostEqual(summary["maximum_observed_rotation_deg"], 2.0)
 
-    def test_deskew_and_rotation_filter_are_separate_opt_in_modes(self):
+    def test_scan_translation_filter_uses_complete_scan_interval(self):
+        class Timeline(object):
+            def covers(self, start, end):
+                return start >= 0.0 and end <= 1.0
+
+            def interpolate(self, stamp):
+                return stamp, 2.0 * stamp, 0.0
+
+        translation_filter = self.player.ScanTranslationFilter(
+            Timeline(), .20)
+        scan = {
+            "header": {"sec": 0, "nanosec": 600000000},
+            "scan_time": .1,
+        }
+        expected = math.hypot(.1, .2)
+        self.assertAlmostEqual(
+            translation_filter.translation(scan), expected, places=12)
+        self.assertFalse(translation_filter.keep(scan))
+        summary = translation_filter.summary()
+        self.assertEqual(summary["observed_scans"], 1)
+        self.assertEqual(summary["filtered_scans"], 1)
+        self.assertAlmostEqual(
+            summary["maximum_observed_translation_m"], expected)
+
+    def test_scan_translation_filter_keeps_uncovered_boundary_scan(self):
+        class Timeline(object):
+            def covers(self, unused_start, unused_end):
+                return False
+
+        translation_filter = self.player.ScanTranslationFilter(
+            Timeline(), .003)
+        scan = {
+            "header": {"sec": 0, "nanosec": 50000000},
+            "scan_time": .1,
+        }
+        self.assertTrue(translation_filter.keep(scan))
+        summary = translation_filter.summary()
+        self.assertEqual(summary["scans_without_coverage"], 1)
+        self.assertEqual(summary["filtered_scans"], 0)
+
+    def test_deskew_and_motion_filters_are_separate_opt_in_modes(self):
         source = (ROOT / "local_nodes" / "replay_player.py").read_text(
             encoding="utf-8")
         self.assertIn('parser.add_argument("--deskew-scans"', source)
+        self.assertIn(
+            'parser.add_argument("--maximum-scan-translation-meters"', source)
+        self.assertIn('"scan_translation_filter":', source)
         self.assertIn('"scan_deskew":', source)
         self.assertIn("deskewer.deskew(payload)", source)
 

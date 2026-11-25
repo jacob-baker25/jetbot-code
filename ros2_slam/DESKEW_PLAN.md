@@ -144,3 +144,27 @@ guarded-strict response and correction limits remain unchanged.  Accept this
 policy only if it preserves closure, improves clearance-connected free space,
 and removes or materially weakens the false wall relative to both the strict
 baseline and the earlier rotation-filter-only diagnostic.
+
+## Stable-0.25 decision and final capture-selection test (2026-11-25)
+
+The combined 1-degree rotation filter and 0.25 m insertion spacing failed the
+navigation-quality gate.  It accepted no matcher corrections, ended 0.474 m
+from closure, increased occupied fragmentation from 262 to 351 components,
+reduced the largest 0.16 m-clearance region from about 2.98 m2 to 2.31 m2, and
+left the false horizontal wall visible.  Matcher diagnostics explain why:
+the median proposed translation correction was about 0.171 m, near the search
+boundary, and all 29 such corrections were rejected by the guarded limit.
+This is longitudinal ambiguity in the short hallway, not evidence that the
+translation guard should be relaxed; the earlier 0.12 m relaxation also made
+the map worse.  The 0.25 m candidate is rejected and the 0.5 m strict baseline
+gate is restored.
+
+One final same-capture selection test is justified by the deliberate pauses in
+the route: retain only scan revolutions spanning at most 0.003 m translation
+and 1 degree rotation.  This implements a bounded stop-and-scan policy without
+changing matcher tolerances or inventing geometry.  The two filters must report
+independent counts over every scan.  Accept only if closure is at most 0.15 m,
+the false wall materially weakens, occupied fragmentation does not exceed the
+strict baseline, and the largest 0.16 m-clearance region reaches the baseline's
+roughly 2.98 m2.  If it fails, stop tuning this capture and move to physical
+LiDAR/environment inspection plus independent translation-odometry validation.
