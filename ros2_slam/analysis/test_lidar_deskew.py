@@ -60,7 +60,7 @@ class LidarDeskewTest(unittest.TestCase):
         self.assertEqual(result["time_increment"], 0.0)
         self.assertEqual(deskewer.summary()["scans_corrected"], 1)
         self.assertAlmostEqual(
-            deskewer.summary()["maximum_point_correction"], 0.0, places=12)
+            deskewer.summary()["maximum_point_correction_m"], 0.0, places=12)
 
     def test_translation_moves_early_endpoint_to_scan_end_frame(self):
         value = scan()
