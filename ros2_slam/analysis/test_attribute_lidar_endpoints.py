@@ -72,6 +72,24 @@ class AttributeLidarEndpointsTest(unittest.TestCase):
         self.assertEqual(reverse_count, 1)
         self.assertAlmostEqual(reverse_fraction, 1.0 / 3.0)
 
+    def test_scan_gate_reproduces_distance_and_heading_reasons(self):
+        gate = self.module.scan_gate_decision
+        accepted, reason = gate(None, (0.0, 0.0, 0.0), 0.5, 0.5)
+        self.assertTrue(accepted)
+        self.assertEqual(reason, "initial")
+        accepted, reason = gate(
+            (0.0, 0.0, 0.0), (0.51, 0.0, 0.0), 0.5, 0.5)
+        self.assertTrue(accepted)
+        self.assertEqual(reason, "distance")
+        accepted, reason = gate(
+            (0.0, 0.0, 0.0), (0.1, 0.0, 0.51), 0.5, 0.5)
+        self.assertTrue(accepted)
+        self.assertEqual(reason, "heading")
+        accepted, reason = gate(
+            (0.0, 0.0, 0.0), (0.1, 0.0, 0.1), 0.5, 0.5)
+        self.assertFalse(accepted)
+        self.assertEqual(reason, "below_threshold")
+
     def test_world_projection_honors_laser_yaw_and_range_limit(self):
         scan = {
             "angle_min": 0.0,

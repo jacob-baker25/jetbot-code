@@ -133,6 +133,23 @@ def motion_for_delta(translation, rotation, translation_threshold,
     return "stationary"
 
 
+def scan_gate_decision(previous_pose, current_pose, distance_threshold,
+                       heading_threshold):
+    """Reproduce the guarded euclidean-heading scan insertion gate."""
+    if previous_pose is None:
+        return True, "initial"
+    distance_squared = (
+        (current_pose[0] - previous_pose[0]) ** 2
+        + (current_pose[1] - previous_pose[1]) ** 2)
+    heading = abs(wrapped_angle_delta(previous_pose[2], current_pose[2]))
+    # The runtime reports 0.249999 for a configured 0.5 m threshold.
+    if distance_squared >= distance_threshold ** 2 - 1e-6:
+        return True, "distance"
+    if heading >= heading_threshold:
+        return True, "heading"
+    return False, "below_threshold"
+
+
 def rotate(x, y, yaw):
     cosine = math.cos(yaw)
     sine = math.sin(yaw)
@@ -272,12 +289,16 @@ def analyze(database, results_json, output, resolution=0.05,
             maximum_range=12.0, minimum_hits=2,
             translation_threshold=0.003,
             rotation_threshold=math.radians(1.0),
+            gate_distance=0.5, gate_heading=0.5,
+            keyframe_minimum_hits=1,
             laser_x=0.0, laser_y=0.0, laser_yaw=math.pi):
     output = Path(output).resolve()
     if output.exists():
         raise AttributionError("Output already exists: {}".format(output))
-    if resolution <= 0 or maximum_range <= 0 or minimum_hits <= 0:
-        raise AttributionError("Resolution, range, and minimum hits must be positive")
+    if (resolution <= 0 or maximum_range <= 0 or minimum_hits <= 0
+            or gate_distance <= 0 or gate_heading <= 0
+            or keyframe_minimum_hits <= 0):
+        raise AttributionError("Resolution, ranges, gates, and hits must be positive")
     route = load_route(results_json)
     connection = open_read_only(database)
     output.mkdir(parents=True)
@@ -290,8 +311,20 @@ def analyze(database, results_json, output, resolution=0.05,
         motion_cells = {}
         raw_counts = {}
         corrected_counts = {}
+        keyframe_pass_cells = {}
+        keyframe_motion_cells = {}
+        keyframe_counts = {}
         scan_counts = {name: 0 for name in PASS_NAMES + MOTION_NAMES}
         point_counts = {name: 0 for name in PASS_NAMES + MOTION_NAMES}
+        keyframe_scan_counts = {
+            name: 0 for name in PASS_NAMES + MOTION_NAMES}
+        keyframe_point_counts = {
+            name: 0 for name in PASS_NAMES + MOTION_NAMES}
+        gate_reasons = {
+            "initial": 0, "distance": 0, "heading": 0,
+            "below_threshold": 0,
+        }
+        previous_keyframe_pose = None
         scans_without_end_pose = 0
 
         cursor = connection.execute(
@@ -339,6 +372,22 @@ def analyze(database, results_json, output, resolution=0.05,
                 increment_cell(pass_cells, cell, pass_name)
                 increment_cell(motion_cells, cell, motion_name)
 
+            accepted, gate_reason = scan_gate_decision(
+                previous_keyframe_pose, end_pose, gate_distance,
+                gate_heading)
+            gate_reasons[gate_reason] += 1
+            if accepted:
+                previous_keyframe_pose = end_pose
+                keyframe_scan_counts[pass_name] += 1
+                keyframe_scan_counts[motion_name] += 1
+                keyframe_point_counts[pass_name] += len(corrected_points)
+                keyframe_point_counts[motion_name] += len(corrected_points)
+                for point in corrected_points:
+                    cell = cell_for_point(point, resolution)
+                    keyframe_counts[cell] = keyframe_counts.get(cell, 0) + 1
+                    increment_cell(keyframe_pass_cells, cell, pass_name)
+                    increment_cell(keyframe_motion_cells, cell, motion_name)
+
         all_cells = set(raw_counts) | set(corrected_counts)
         bounds = image_bounds(all_cells)
         write_ppm(
@@ -353,6 +402,15 @@ def analyze(database, results_json, output, resolution=0.05,
         write_density_pgm(
             output / "deskewed_endpoint_density.pgm", corrected_counts,
             bounds, minimum_hits)
+        write_ppm(
+            output / "keyframes_by_pass.ppm", keyframe_pass_cells,
+            PASS_NAMES, PASS_COLORS, keyframe_minimum_hits, bounds)
+        write_ppm(
+            output / "keyframes_by_motion.ppm", keyframe_motion_cells,
+            MOTION_NAMES, MOTION_COLORS, keyframe_minimum_hits, bounds)
+        write_density_pgm(
+            output / "keyframe_endpoint_density.pgm", keyframe_counts,
+            bounds, keyframe_minimum_hits)
         combined_cells = {}
         for cell in set(pass_cells) | set(motion_cells) | set(raw_counts):
             combined_cells[cell] = {}
@@ -361,6 +419,16 @@ def analyze(database, results_json, output, resolution=0.05,
         write_cell_csv(
             output / "cell_attribution.csv", combined_cells, raw_counts,
             corrected_counts, resolution)
+        keyframe_combined_cells = {}
+        for cell in set(keyframe_pass_cells) | set(keyframe_motion_cells):
+            keyframe_combined_cells[cell] = {}
+            keyframe_combined_cells[cell].update(
+                keyframe_pass_cells.get(cell, {}))
+            keyframe_combined_cells[cell].update(
+                keyframe_motion_cells.get(cell, {}))
+        write_cell_csv(
+            output / "keyframe_cell_attribution.csv",
+            keyframe_combined_cells, {}, keyframe_counts, resolution)
 
         outbound = active_cells(pass_cells, "outbound", minimum_hits)
         returning = active_cells(pass_cells, "return", minimum_hits)
@@ -374,6 +442,15 @@ def analyze(database, results_json, output, resolution=0.05,
         corrected_active = {cell for cell, count in corrected_counts.items()
                             if count >= minimum_hits}
         raw_corrected_exact = raw_active & corrected_active
+        keyframe_outbound = active_cells(
+            keyframe_pass_cells, "outbound", keyframe_minimum_hits)
+        keyframe_return = active_cells(
+            keyframe_pass_cells, "return", keyframe_minimum_hits)
+        keyframe_exact = keyframe_outbound & keyframe_return
+        keyframe_outbound_near_count, keyframe_outbound_near_fraction = (
+            neighborhood_overlap(keyframe_outbound, keyframe_return, radius=1))
+        keyframe_return_near_count, keyframe_return_near_fraction = (
+            neighborhood_overlap(keyframe_return, keyframe_outbound, radius=1))
         manifest = {
             "version": 1,
             "database": str(Path(database).resolve()),
@@ -382,6 +459,7 @@ def analyze(database, results_json, output, resolution=0.05,
             "resolution_m": resolution,
             "maximum_range_m": maximum_range,
             "minimum_hits_per_cell": minimum_hits,
+            "keyframe_minimum_hits_per_cell": keyframe_minimum_hits,
             "translation_threshold_m_per_scan": translation_threshold,
             "rotation_threshold_deg_per_scan": math.degrees(
                 rotation_threshold),
@@ -392,6 +470,17 @@ def analyze(database, results_json, output, resolution=0.05,
                       if key != "checkpoints"},
             "scan_counts": scan_counts,
             "corrected_point_counts": point_counts,
+            "keyframe_scan_counts": keyframe_scan_counts,
+            "keyframe_corrected_point_counts": keyframe_point_counts,
+            "scan_gate": {
+                "distance_threshold_m": gate_distance,
+                "heading_threshold_rad": gate_heading,
+                "heading_threshold_deg": math.degrees(gate_heading),
+                "accepted_scans": (
+                    gate_reasons["initial"] + gate_reasons["distance"]
+                    + gate_reasons["heading"]),
+                "reasons": gate_reasons,
+            },
             "active_cell_counts_by_pass": {
                 name: len(active_cells(pass_cells, name, minimum_hits))
                 for name in PASS_NAMES
@@ -434,6 +523,23 @@ def analyze(database, results_json, output, resolution=0.05,
                     len(raw_corrected_exact) / float(len(corrected_active))
                     if corrected_active else 0.0),
             },
+            "keyframe_pass_overlap": {
+                "outbound_cells": len(keyframe_outbound),
+                "return_cells": len(keyframe_return),
+                "exact_shared_cells": len(keyframe_exact),
+                "exact_outbound_fraction": (
+                    len(keyframe_exact) / float(len(keyframe_outbound))
+                    if keyframe_outbound else 0.0),
+                "exact_return_fraction": (
+                    len(keyframe_exact) / float(len(keyframe_return))
+                    if keyframe_return else 0.0),
+                "within_one_cell_outbound_count": (
+                    keyframe_outbound_near_count),
+                "within_one_cell_outbound_fraction": (
+                    keyframe_outbound_near_fraction),
+                "within_one_cell_return_count": keyframe_return_near_count,
+                "within_one_cell_return_fraction": keyframe_return_near_fraction,
+            },
             "image_legend": {
                 "pass_colors_rgb": PASS_COLORS,
                 "motion_colors_rgb": MOTION_COLORS,
@@ -460,6 +566,9 @@ def main(args=None):
     parser.add_argument("--translation-threshold", type=float, default=0.003)
     parser.add_argument(
         "--rotation-threshold-degrees", type=float, default=1.0)
+    parser.add_argument("--gate-distance", type=float, default=0.5)
+    parser.add_argument("--gate-heading", type=float, default=0.5)
+    parser.add_argument("--keyframe-minimum-hits", type=int, default=1)
     parser.add_argument("--laser-x", type=float, default=0.0)
     parser.add_argument("--laser-y", type=float, default=0.0)
     parser.add_argument("--laser-yaw", type=float, default=math.pi)
@@ -474,6 +583,9 @@ def main(args=None):
         translation_threshold=parsed.translation_threshold,
         rotation_threshold=math.radians(
             parsed.rotation_threshold_degrees),
+        gate_distance=parsed.gate_distance,
+        gate_heading=parsed.gate_heading,
+        keyframe_minimum_hits=parsed.keyframe_minimum_hits,
         laser_x=parsed.laser_x, laser_y=parsed.laser_y,
         laser_yaw=parsed.laser_yaw)
     print("LIDAR_ENDPOINT_ATTRIBUTION " + json.dumps({
@@ -483,7 +595,10 @@ def main(args=None):
         "turnaround_end_label": manifest["route"][
             "turnaround_end_label"],
         "pass_overlap": manifest["pass_overlap"],
+        "keyframe_pass_overlap": manifest["keyframe_pass_overlap"],
+        "scan_gate": manifest["scan_gate"],
         "scan_counts": manifest["scan_counts"],
+        "keyframe_scan_counts": manifest["keyframe_scan_counts"],
     }, sort_keys=True), flush=True)
     return 0
 
