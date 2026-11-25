@@ -72,6 +72,11 @@ def load_player():
     node = types.ModuleType("rclpy.node"); node.Node = FakeNode
     qos = types.ModuleType("rclpy.qos"); qos.qos_profile_sensor_data = object()
     fake_modules = {"rclpy": rclpy, "rclpy.node": node, "rclpy.qos": qos}
+    deskew = types.ModuleType("lidar_deskew")
+    deskew.PoseTimeline = object
+    deskew.ScanDeskewer = object
+    deskew.pose_samples_from_connection = lambda connection: []
+    fake_modules["lidar_deskew"] = deskew
     for module_name, values in (
             ("geometry_msgs.msg", {"TransformStamped": TransformStamped}),
             ("nav_msgs.msg", {"Odometry": Odometry}),
@@ -205,6 +210,13 @@ class ReplayPlayerTest(unittest.TestCase):
         self.assertEqual(summary["observed_scans"], 1)
         self.assertEqual(summary["filtered_scans"], 1)
         self.assertAlmostEqual(summary["maximum_observed_rotation_deg"], 2.0)
+
+    def test_deskew_and_rotation_filter_are_separate_opt_in_modes(self):
+        source = (ROOT / "local_nodes" / "replay_player.py").read_text(
+            encoding="utf-8")
+        self.assertIn('parser.add_argument("--deskew-scans"', source)
+        self.assertIn('"scan_deskew":', source)
+        self.assertIn("deskewer.deskew(payload)", source)
 
 
 if __name__ == "__main__":

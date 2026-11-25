@@ -69,6 +69,8 @@ class ReplayTrialTest(unittest.TestCase):
                 "--maximum-scan-rotation-degrees", "1.0"
             ]).maximum_scan_rotation_degrees,
             1.0)
+        self.assertFalse(parser.parse_args(common).deskew_scans)
+        self.assertTrue(parser.parse_args(common + ["--deskew-scans"]).deskew_scans)
 
 
 if __name__ == "__main__":

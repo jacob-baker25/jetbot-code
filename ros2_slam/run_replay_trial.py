@@ -205,6 +205,7 @@ def parser():
     result.add_argument("--rate", type=float, default=1.0)
     result.add_argument("--maximum-lateness", type=float, default=0.25)
     result.add_argument("--maximum-scan-rotation-degrees", type=float)
+    result.add_argument("--deskew-scans", action="store_true")
     result.add_argument("--laser-x", type=float, default=0.0)
     result.add_argument("--laser-y", type=float, default=0.0)
     result.add_argument("--laser-z", type=float, default=0.1778)
@@ -219,6 +220,9 @@ def main(args=None):
     if (parsed.maximum_scan_rotation_degrees is not None
             and not 0 < parsed.maximum_scan_rotation_degrees <= 180):
         parser().error("maximum scan rotation must be in (0, 180] degrees")
+    if (parsed.deskew_scans
+            and parsed.maximum_scan_rotation_degrees is not None):
+        parser().error("deskew and scan-rotation filtering are mutually exclusive")
 
     database = parsed.database.resolve()
     params = parsed.params_file.resolve()
@@ -266,6 +270,7 @@ def main(args=None):
         "rate": parsed.rate,
         "maximum_lateness_s": parsed.maximum_lateness,
         "maximum_scan_rotation_degrees": parsed.maximum_scan_rotation_degrees,
+        "deskew_scans": parsed.deskew_scans,
         "laser_transform": {
             "x": parsed.laser_x,
             "y": parsed.laser_y,
@@ -313,6 +318,13 @@ def main(args=None):
             player_command.extend([
                 "--maximum-scan-rotation-degrees",
                 str(parsed.maximum_scan_rotation_degrees),
+            ])
+        if parsed.deskew_scans:
+            player_command.extend([
+                "--deskew-scans",
+                "--laser-x", str(parsed.laser_x),
+                "--laser-y", str(parsed.laser_y),
+                "--laser-yaw", str(parsed.laser_yaw),
             ])
         player_rc, player_text = stream_process(
             player_command,

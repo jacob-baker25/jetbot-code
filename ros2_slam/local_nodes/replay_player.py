@@ -23,6 +23,8 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, LaserScan
 from tf2_msgs.msg import TFMessage
 
+from lidar_deskew import PoseTimeline, ScanDeskewer, pose_samples_from_connection
+
 
 VERSION = 1
 SLAM_INPUT_TOPICS = ("/scan_slam", "/odom_rf2o", "/tf")
@@ -387,17 +389,24 @@ class ReplayPlayer(Node):
 
 
 def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
-           maximum_lateness=0.25, maximum_scan_rotation=None):
+           maximum_lateness=0.25, maximum_scan_rotation=None,
+           deskew_scans=False, laser_x=0.0, laser_y=0.0,
+           laser_yaw=math.pi):
     metadata = validate_database(database)
     connection = open_read_only(database)
     counts = {topic: 0 for topic in SLAM_INPUT_TOPICS}
     filtered_tf = 0
     timing = LatenessTracker(maximum_lateness)
     rotation_filter = None
+    deskewer = None
     try:
         if maximum_scan_rotation is not None:
             rotation_filter = ScanRotationFilter.from_connection(
                 connection, maximum_scan_rotation)
+        if deskew_scans:
+            deskewer = ScanDeskewer(
+                PoseTimeline(pose_samples_from_connection(connection)),
+                laser_x=laser_x, laser_y=laser_y, laser_yaw=laser_yaw)
         print(
             "REPLAY_PLAYER_READY version={} mode=slam_inputs rate={} rows={} "
             "duration_s={:.3f}".format(
@@ -423,6 +432,8 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
             if (topic == "/scan_slam" and rotation_filter is not None
                     and not rotation_filter.keep(payload)):
                 continue
+            if topic == "/scan_slam" and deskewer is not None:
+                payload = deskewer.deskew(payload)
             published = node.publish_payload(topic, payload, mapper)
             if published:
                 counts[topic] += 1
@@ -446,6 +457,8 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
         "timing": timing_summary,
         "scan_rotation_filter": (
             rotation_filter.summary() if rotation_filter is not None else None),
+        "scan_deskew": (
+            deskewer.summary() if deskewer is not None else None),
     }
     print("REPLAY_PLAYER_SUMMARY " + json.dumps(summary, sort_keys=True), flush=True)
     return summary
@@ -459,6 +472,10 @@ def main(args=None):
     parser.add_argument("--linger", type=float, default=1.0)
     parser.add_argument("--maximum-lateness", type=float, default=0.25)
     parser.add_argument("--maximum-scan-rotation-degrees", type=float)
+    parser.add_argument("--deskew-scans", action="store_true")
+    parser.add_argument("--laser-x", type=float, default=0.0)
+    parser.add_argument("--laser-y", type=float, default=0.0)
+    parser.add_argument("--laser-yaw", type=float, default=math.pi)
     parsed = parser.parse_args(args)
     if parsed.rate <= 0 or parsed.start_delay < 0 or parsed.linger < 0:
         parser.error("rate must be positive; delays must be nonnegative")
@@ -467,6 +484,9 @@ def main(args=None):
     if (parsed.maximum_scan_rotation_degrees is not None
             and not 0 < parsed.maximum_scan_rotation_degrees <= 180):
         parser.error("maximum scan rotation must be in (0, 180] degrees")
+    if (parsed.deskew_scans
+            and parsed.maximum_scan_rotation_degrees is not None):
+        parser.error("deskew and scan-rotation filtering are mutually exclusive")
 
     metadata = validate_database(parsed.database)
     if metadata["duration_s"] / parsed.rate > 3600:
@@ -478,7 +498,9 @@ def main(args=None):
             parsed.database, node, parsed.rate, parsed.start_delay,
             parsed.linger, parsed.maximum_lateness,
             (math.radians(parsed.maximum_scan_rotation_degrees)
-             if parsed.maximum_scan_rotation_degrees is not None else None))
+             if parsed.maximum_scan_rotation_degrees is not None else None),
+            parsed.deskew_scans, parsed.laser_x, parsed.laser_y,
+            parsed.laser_yaw)
     except KeyboardInterrupt:
         return 130
     finally:
