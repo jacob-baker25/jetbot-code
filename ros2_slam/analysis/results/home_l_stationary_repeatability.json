@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "capture": "lidar_replay_home_l_31228b5_02",
+  "database_sha256": "2ba17a7366914b5189bb28b3ee2a724c24480e9de589c92f54c41d403e3692e8",
+  "thresholds": {
+    "translation_m_per_scan": 0.003,
+    "rotation_deg_per_scan": 1.0,
+    "stable_range_m": 0.05,
+    "endpoint_resolution_m": 0.05
+  },
+  "scan_counts": {
+    "observed": 1558,
+    "without_pose_coverage": 1,
+    "stationary": 802,
+    "stationary_in_episodes": 685,
+    "episodes": 13
+  },
+  "within_episode": {
+    "median_stable_bin_fraction": 1.0,
+    "median_episode_p95_range_mad_m": 0.006421804428100579,
+    "repeatable": true
+  },
+  "closest_revisit": {
+    "first_episode": 0,
+    "second_episode": 12,
+    "elapsed_s": 83.3722071647644,
+    "recorded_pose_translation_m": 0.05541385844264372,
+    "recorded_pose_rotation_deg": 2.0028129171158824,
+    "recorded_within_one_cell_fractions": [
+      0.5380434782608695,
+      0.5668449197860963
+    ],
+    "bounded_alignment": {
+      "evaluated_poses": 6069,
+      "translation_window_m": 0.2,
+      "translation_step_m": 0.025,
+      "rotation_window_deg": 10.0,
+      "rotation_step_deg": 1.0,
+      "correction_x_m": 0.1,
+      "correction_y_m": -0.07500000000000001,
+      "correction_yaw_deg": -2.0,
+      "corrected_within_one_cell_fractions": [
+        0.9347826086956522,
+        0.9453551912568307
+      ]
+    }
+  },
+  "interpretation": "inter_stop_pose_error_supported",
+  "limitations": [
+    "Uses resampled scans rather than original raw acquisition order.",
+    "Recorded odometry selects stationary episodes and is not ground truth.",
+    "A repeatable scan can still contain a fixed geometric calibration bias."
+  ]
+}
