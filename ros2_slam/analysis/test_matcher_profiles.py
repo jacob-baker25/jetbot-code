@@ -40,6 +40,19 @@ def scalar_yaml(path):
 
 
 class ProfilesTest(unittest.TestCase):
+    def test_stable025_candidate_changes_only_distance_threshold(self):
+        config_root = ROOT / "slam_toolbox/config"
+        strict = scalar_yaml(
+            config_root / "mapper_params_online_sync_guarded_strict.yaml")
+        stable = scalar_yaml(
+            config_root /
+            "mapper_params_online_sync_guarded_strict_stable025.yaml")
+        self.assertEqual(set(strict), set(stable))
+        differences = {key for key in strict if strict[key] != stable[key]}
+        self.assertEqual(differences, {"minimum_travel_distance"})
+        self.assertEqual(float(strict["minimum_travel_distance"]), 0.5)
+        self.assertEqual(float(stable["minimum_travel_distance"]), 0.25)
+
     def test_heading025_candidate_changes_only_heading_threshold(self):
         config_root = ROOT / "slam_toolbox/config"
         strict = scalar_yaml(

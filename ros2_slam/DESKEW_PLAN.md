@@ -126,3 +126,21 @@ stationary, translating, and turning scans.  This determines whether the false
 structure is tied to turn timing, disagreement between route passes, persistent
 sensor geometry, or a short-lived obstacle before another algorithm or physical
 experiment is authorized.
+
+## Keyframe attribution decision (2026-11-25)
+
+The endpoint diagnostic reproduced all 29 mapper insertions exactly.  Although
+the complete outbound and return streams agreed within one 0.05 m cell for
+87--93% of active cells, the sparse map-building scans agreed for only 44--58%.
+Seventeen of the 29 keyframes were captured during rotation or simultaneous
+rotation/translation, 11 during straight translation, and one while stationary.
+The saved map is therefore dominated by sparse, inconsistent turn views even
+though the underlying stream is substantially more repeatable.
+
+The next replay tests one coherent scan-selection policy, not a matcher tune:
+suppress scans rotating more than 1 degree during acquisition, then reduce only
+straight-line insertion spacing from 0.5 m to 0.25 m to restore coverage.  All
+guarded-strict response and correction limits remain unchanged.  Accept this
+policy only if it preserves closure, improves clearance-connected free space,
+and removes or materially weakens the false wall relative to both the strict
+baseline and the earlier rotation-filter-only diagnostic.
