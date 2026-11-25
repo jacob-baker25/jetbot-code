@@ -168,3 +168,24 @@ the false wall materially weakens, occupied fragmentation does not exceed the
 strict baseline, and the largest 0.16 m-clearance region reaches the baseline's
 roughly 2.98 m2.  If it fails, stop tuning this capture and move to physical
 LiDAR/environment inspection plus independent translation-odometry validation.
+
+## Stationary-scan decision (2026-11-25)
+
+The final selection replay was technically clean but failed the map-quality
+gate.  Both motion filters classified all 1,558 scans independently and 803
+revolutions survived their intersection.  The mapper inserted 13 states,
+accepted three guarded corrections, and preserved strong closure at 0.055 m
+and 2.90 degrees.  Occupied fragmentation fell from 262 to 177 components, but
+mapped free cells fell from 10,133 to 6,859 and the largest connected region
+with 0.16 m clearance collapsed from about 2.98 m2 to 1.08 m2.  The visual map
+remains sparse and contains long false barriers/rays.  Good closure alone is
+therefore not sufficient for navigation, and stop-and-scan filtering is
+rejected as the production solution.
+
+This completes same-capture mapper, motion-selection, and deskew tuning.  Do
+not run more threshold sweeps on this database.  The next evidence must
+separate two remaining causes: inconsistent LiDAR returns/physical geometry,
+or incorrect translation poses between known stops.  First audit stationary
+scan repeatability and return quality at repeated poses, then perform a short
+tape-measured translation validation with a rigid, level sensor in a controlled
+scene.  Only after one cause is identified should mapping code change again.
