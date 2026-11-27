@@ -78,6 +78,10 @@ class ReplayTrialTest(unittest.TestCase):
             0.003)
         self.assertFalse(parser.parse_args(common).deskew_scans)
         self.assertTrue(parser.parse_args(common + ["--deskew-scans"]).deskew_scans)
+        self.assertFalse(parser.parse_args(common).stationary_median_scans)
+        self.assertTrue(parser.parse_args(common + [
+            "--stationary-median-scans"
+        ]).stationary_median_scans)
 
 
 if __name__ == "__main__":

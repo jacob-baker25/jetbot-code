@@ -207,6 +207,7 @@ def parser():
     result.add_argument("--maximum-scan-rotation-degrees", type=float)
     result.add_argument("--maximum-scan-translation-meters", type=float)
     result.add_argument("--deskew-scans", action="store_true")
+    result.add_argument("--stationary-median-scans", action="store_true")
     result.add_argument("--laser-x", type=float, default=0.0)
     result.add_argument("--laser-y", type=float, default=0.0)
     result.add_argument("--laser-z", type=float, default=0.1778)
@@ -224,10 +225,14 @@ def main(args=None):
     if (parsed.maximum_scan_translation_meters is not None
             and not 0 < parsed.maximum_scan_translation_meters <= 1):
         parser().error("maximum scan translation must be in (0, 1] meters")
-    if (parsed.deskew_scans and (
-            parsed.maximum_scan_rotation_degrees is not None
-            or parsed.maximum_scan_translation_meters is not None)):
-        parser().error("deskew and scan-motion filtering are mutually exclusive")
+    selected_scan_policies = sum((
+        bool(parsed.deskew_scans),
+        parsed.maximum_scan_rotation_degrees is not None,
+        parsed.maximum_scan_translation_meters is not None,
+        bool(parsed.stationary_median_scans),
+    ))
+    if selected_scan_policies > 1:
+        parser().error("scan replay policies are mutually exclusive")
 
     database = parsed.database.resolve()
     params = parsed.params_file.resolve()
@@ -278,6 +283,7 @@ def main(args=None):
         "maximum_scan_translation_meters": (
             parsed.maximum_scan_translation_meters),
         "deskew_scans": parsed.deskew_scans,
+        "stationary_median_scans": parsed.stationary_median_scans,
         "laser_transform": {
             "x": parsed.laser_x,
             "y": parsed.laser_y,
@@ -338,6 +344,8 @@ def main(args=None):
                 "--laser-y", str(parsed.laser_y),
                 "--laser-yaw", str(parsed.laser_yaw),
             ])
+        if parsed.stationary_median_scans:
+            player_command.append("--stationary-median-scans")
         player_rc, player_text = stream_process(
             player_command,
             output / "player.log")

@@ -135,6 +135,44 @@ for map construction.
 
 ## Phase 4: select one implementation branch
 
+### Phase 3 result and Phase 4 gate (2026-11-27)
+
+The measured 0--3--6--3--0 ft translation trial completed with valid timing and
+no RF2O estimate rejections.  At the full 6 ft mark, fused radial distance was
+1.810 m versus 1.829 m measured (-0.019 m).  The return 3 ft checkpoint was
+0.913 m versus 0.914 m measured (-0.001 m), and final fused closure was 0.034 m
+and 1.2 degrees.  The first 3 ft stop read 0.968 m (+0.054 m), slightly outside
+the 0.05 m/m target, but the other measured stops do not show a systematic
+scale error.  A swivel-caster event caused a visible return-path veer and a
+manual heading correction, so this trial does not independently qualify the
+lateral-error requirement.
+
+The replay contained 3,213 stationary scans in seven dwell-qualified episodes.
+Median within-stop p95 range MAD was 0.00815 m and the initial/final median
+endpoints overlapped within one 0.05 m cell by 89.6% and 91.2% using the
+recorded pose.  A 0.075 m lateral correction raised overlap to 95.6% and 94.7%.
+This supports short-route pose consistency but leaves a small lateral ambiguity
+that could be physical final offset, caster motion, or pose error.  It does not
+justify replacing translation sensing before testing mapper observability.
+
+The next authorized test is therefore a single Branch C offline comparison,
+not another parameter sweep.  Consolidate each genuine stationary episode to
+one per-angle temporal-median scan while replaying the original odometry and TF
+unchanged.  Episode selection is fixed before looking at map output: at most
+0.003 m and 1 degree motion during a scan, at most 0.03 m and 2 degrees spread
+within an episode, no gap above 0.30 s, at least eight scans, and a valid return
+in at least 60% of episode scans.  The old L-route should yield 13 consolidated
+scans; the translation validation should yield seven.
+
+Compare the L-route temporal-median map against the immutable strict baseline
+and the prior 803-scan stationary-only replay.  Continue Branch C only if it
+removes or materially weakens the known false barrier without degrading pose
+closure or 0.16 m-clearance connectivity.  If the sparse old capture fails,
+one new forward-only route with five-second stops every 0.25--0.30 m is allowed;
+that capture tests the planned operating method rather than another threshold.
+If both the old-capture comparison and the dense-stop confirmation fail, stop
+Branch C and revisit lateral pose sensing or an alternative mapper.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,

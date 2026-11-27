@@ -24,6 +24,7 @@ from sensor_msgs.msg import Imu, LaserScan
 from tf2_msgs.msg import TFMessage
 
 from lidar_deskew import PoseTimeline, ScanDeskewer, pose_samples_from_connection
+from stationary_scan_aggregation import StationaryMedianScanSelector
 
 
 VERSION = 1
@@ -448,6 +449,7 @@ class ReplayPlayer(Node):
 def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
            maximum_lateness=0.25, maximum_scan_rotation=None,
            maximum_scan_translation=None, deskew_scans=False,
+           stationary_median_scans=False,
            laser_x=0.0, laser_y=0.0,
            laser_yaw=math.pi):
     metadata = validate_database(database)
@@ -458,6 +460,7 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
     rotation_filter = None
     translation_filter = None
     deskewer = None
+    stationary_selector = None
     try:
         if maximum_scan_rotation is not None:
             rotation_filter = ScanRotationFilter.from_connection(
@@ -469,6 +472,10 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
             deskewer = ScanDeskewer(
                 PoseTimeline(pose_samples_from_connection(connection)),
                 laser_x=laser_x, laser_y=laser_y, laser_yaw=laser_yaw)
+        if stationary_median_scans:
+            stationary_selector = StationaryMedianScanSelector.from_connection(
+                connection,
+                PoseTimeline(pose_samples_from_connection(connection)))
         print(
             "REPLAY_PLAYER_READY version={} mode=slam_inputs rate={} rows={} "
             "duration_s={:.3f}".format(
@@ -492,15 +499,20 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
             timing.observe(sequence, topic, relative_s, lateness)
             payload = json.loads(encoded)
             if topic == "/scan_slam":
-                keep_scan = True
-                if (rotation_filter is not None
-                        and not rotation_filter.keep(payload)):
-                    keep_scan = False
-                if (translation_filter is not None
-                        and not translation_filter.keep(payload)):
-                    keep_scan = False
-                if not keep_scan:
-                    continue
+                if stationary_selector is not None:
+                    payload = stationary_selector.payload_for(sequence)
+                    if payload is None:
+                        continue
+                else:
+                    keep_scan = True
+                    if (rotation_filter is not None
+                            and not rotation_filter.keep(payload)):
+                        keep_scan = False
+                    if (translation_filter is not None
+                            and not translation_filter.keep(payload)):
+                        keep_scan = False
+                    if not keep_scan:
+                        continue
             if topic == "/scan_slam" and deskewer is not None:
                 payload = deskewer.deskew(payload)
             published = node.publish_payload(topic, payload, mapper)
@@ -531,6 +543,9 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
             if translation_filter is not None else None),
         "scan_deskew": (
             deskewer.summary() if deskewer is not None else None),
+        "stationary_median_scans": (
+            stationary_selector.summary()
+            if stationary_selector is not None else None),
     }
     print("REPLAY_PLAYER_SUMMARY " + json.dumps(summary, sort_keys=True), flush=True)
     return summary
@@ -546,6 +561,7 @@ def main(args=None):
     parser.add_argument("--maximum-scan-rotation-degrees", type=float)
     parser.add_argument("--maximum-scan-translation-meters", type=float)
     parser.add_argument("--deskew-scans", action="store_true")
+    parser.add_argument("--stationary-median-scans", action="store_true")
     parser.add_argument("--laser-x", type=float, default=0.0)
     parser.add_argument("--laser-y", type=float, default=0.0)
     parser.add_argument("--laser-yaw", type=float, default=math.pi)
@@ -560,10 +576,14 @@ def main(args=None):
     if (parsed.maximum_scan_translation_meters is not None
             and not 0 < parsed.maximum_scan_translation_meters <= 1):
         parser.error("maximum scan translation must be in (0, 1] meters")
-    if (parsed.deskew_scans and (
-            parsed.maximum_scan_rotation_degrees is not None
-            or parsed.maximum_scan_translation_meters is not None)):
-        parser.error("deskew and scan-motion filtering are mutually exclusive")
+    selected_scan_policies = sum((
+        bool(parsed.deskew_scans),
+        parsed.maximum_scan_rotation_degrees is not None,
+        parsed.maximum_scan_translation_meters is not None,
+        bool(parsed.stationary_median_scans),
+    ))
+    if selected_scan_policies > 1:
+        parser.error("scan replay policies are mutually exclusive")
 
     metadata = validate_database(parsed.database)
     if metadata["duration_s"] / parsed.rate > 3600:
@@ -577,7 +597,8 @@ def main(args=None):
             (math.radians(parsed.maximum_scan_rotation_degrees)
              if parsed.maximum_scan_rotation_degrees is not None else None),
             parsed.maximum_scan_translation_meters,
-            parsed.deskew_scans, parsed.laser_x, parsed.laser_y,
+            parsed.deskew_scans, parsed.stationary_median_scans,
+            parsed.laser_x, parsed.laser_y,
             parsed.laser_yaw)
     except KeyboardInterrupt:
         return 130

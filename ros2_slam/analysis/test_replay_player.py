@@ -77,6 +77,9 @@ def load_player():
     deskew.ScanDeskewer = object
     deskew.pose_samples_from_connection = lambda connection: []
     fake_modules["lidar_deskew"] = deskew
+    aggregation = types.ModuleType("stationary_scan_aggregation")
+    aggregation.StationaryMedianScanSelector = object
+    fake_modules["stationary_scan_aggregation"] = aggregation
     for module_name, values in (
             ("geometry_msgs.msg", {"TransformStamped": TransformStamped}),
             ("nav_msgs.msg", {"Odometry": Odometry}),
@@ -256,10 +259,13 @@ class ReplayPlayerTest(unittest.TestCase):
             encoding="utf-8")
         self.assertIn('parser.add_argument("--deskew-scans"', source)
         self.assertIn(
+            'parser.add_argument("--stationary-median-scans"', source)
+        self.assertIn(
             'parser.add_argument("--maximum-scan-translation-meters"', source)
         self.assertIn('"scan_translation_filter":', source)
         self.assertIn('"scan_deskew":', source)
         self.assertIn("deskewer.deskew(payload)", source)
+        self.assertIn('"stationary_median_scans":', source)
 
 
 if __name__ == "__main__":
