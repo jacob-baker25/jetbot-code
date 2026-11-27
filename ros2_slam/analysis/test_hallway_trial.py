@@ -1,5 +1,7 @@
 import ast
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import sys
@@ -273,6 +275,59 @@ class HallwayTrialTest(unittest.TestCase):
             adjust(node, .02)
         self.assertEqual(node.turn_speed, .30)
         self.assertEqual(len(stopped), 31)
+
+    def test_drive_speed_adjustment_is_bounded_and_visible(self):
+        node = types.SimpleNamespace(speed=.25)
+        adjust = session_method("adjust_drive_speed", dict(
+            MIN_DRIVE_SPEED=.15,
+            MAX_DRIVE_SPEED=.60,
+        ))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            adjust(node, -.05)
+            adjust(node, -.05)
+            adjust(node, -.05)
+        self.assertEqual(node.speed, .15)
+        self.assertIn("Drive speed: 0.15", output.getvalue())
+        with contextlib.redirect_stdout(output):
+            for unused in range(20):
+                adjust(node, .05)
+        self.assertEqual(node.speed, .60)
+
+    def test_p_key_is_drive_speed_decrease_alias(self):
+        keys = iter(["p", "q"])
+        adjustments = []
+        stopped = []
+        node = types.SimpleNamespace(
+            moving=False,
+            motion_guard_enabled=False,
+            odom_mode="imu_yaw",
+            require_processes_alive=lambda: None,
+            print_controls=lambda: None,
+            adjust_drive_speed=lambda delta: adjustments.append(delta),
+            update_watchdog=lambda: None,
+            stop_robot=lambda: stopped.append(True),
+        )
+        ns = dict(
+            DRIVE_SPEED_STEP=.05,
+            rclpy=types.SimpleNamespace(
+                ok=lambda: True,
+                spin_once=lambda *args, **kwargs: None),
+            sys=types.SimpleNamespace(stdin=types.SimpleNamespace(
+                fileno=lambda: 0,
+                read=lambda unused_count: next(keys))),
+            select=types.SimpleNamespace(
+                select=lambda *args: ([object()], [], [])),
+            termios=types.SimpleNamespace(
+                tcgetattr=lambda unused_fd: "saved",
+                TCSADRAIN=1,
+                tcsetattr=lambda *args: None),
+            tty=types.SimpleNamespace(setcbreak=lambda unused_fd: None),
+        )
+        with contextlib.redirect_stdout(io.StringIO()):
+            session_method("teleop_loop", ns)(node)
+        self.assertEqual(adjustments, [-.05])
+        self.assertTrue(stopped)
 
     def test_slam_settles_before_rf2o_and_scan_relay_follows(self):
         import shlex

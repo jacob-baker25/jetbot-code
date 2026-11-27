@@ -79,6 +79,9 @@ BIAS_L = 1.0
 BIAS_R = 1.0
 
 DRIVE_SPEED = 0.25
+MIN_DRIVE_SPEED = 0.15
+MAX_DRIVE_SPEED = 0.60
+DRIVE_SPEED_STEP = 0.05
 TURN_SPEED = 0.18
 
 MIN_TURN_SPEED = 0.08
@@ -1913,6 +1916,27 @@ class MappingSession(Node):
         )
 
 
+    def adjust_drive_speed(self, delta):
+
+        self.speed = max(
+            MIN_DRIVE_SPEED,
+            min(
+                MAX_DRIVE_SPEED,
+                self.speed + delta
+            )
+        )
+
+        print(
+            (
+                "\rDrive speed: {:.2f}     "
+            ).format(
+                self.speed
+            ),
+            end="",
+            flush=True
+        )
+
+
     def stop_robot(self):
 
         try:
@@ -2755,7 +2779,7 @@ class MappingSession(Node):
             "  +      increase drive speed"
         )
         print(
-            "  -      decrease drive speed"
+            "  - / P  decrease drive speed"
         )
 
         print(
@@ -2937,26 +2961,17 @@ class MappingSession(Node):
                         "="
                     ]:
 
-                        self.speed = min(
-                            0.60,
-                            self.speed + 0.05
+                        self.adjust_drive_speed(
+                            DRIVE_SPEED_STEP
                         )
 
-                        print(
-                            (
-                                "\rDrive speed: {:.2f}     "
-                            ).format(
-                                self.speed
-                            ),
-                            end="",
-                            flush=True
-                        )
+                    elif key in [
+                        "-",
+                        "p"
+                    ]:
 
-                    elif key == "-":
-
-                        self.speed = max(
-                            0.15,
-                            self.speed - 0.05
+                        self.adjust_drive_speed(
+                            -DRIVE_SPEED_STEP
                         )
 
                     elif key == "[":
