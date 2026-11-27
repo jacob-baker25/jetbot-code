@@ -173,6 +173,31 @@ that capture tests the planned operating method rather than another threshold.
 If both the old-capture comparison and the dense-stop confirmation fail, stop
 Branch C and revisit lateral pose sensing or an alternative mapper.
 
+### Sparse stationary-median result (2026-11-27)
+
+The bounded-memory confirmation replay passed scheduling with zero late
+messages (maximum lateness 0.135 s) and published exactly 13 median scans.  Its
+map was byte-for-byte identical to the earlier timing-failed diagnostic map,
+so the result is reproducible and not caused by the original scheduler stalls.
+
+Median consolidation reduced occupied 8-connected components from 177 in the
+803-scan stationary-only map to 150, and isolated occupied cells from 102 to
+71.  However, mapped free cells fell from 6,859 to 5,600 and the largest region
+retaining the conservative 0.16 m center clearance fell from 0.870 m2 to
+0.708 m2.  The central false-barrier structure remains visible.  The old
+capture therefore fails Branch C qualification: suppressing repeated scans is
+not enough when its physical stops are roughly 0.75--1 m apart.
+
+No more replays or thresholds are authorized on that capture.  The single
+remaining Branch C test is a new forward-only L-route with stops every 1 ft
+(0.305 m), five seconds stationary at each stop and after each turn, and no
+reverse driving.  Record the normal continuous streams once, then produce two
+offline maps from the immutable database: unfiltered strict baseline and the
+fixed stationary-median policy.  Judge both with the same false-opening review,
+occupied fragmentation, and 0.16 m-clearance connectivity.  If the dense-stop
+median map does not materially improve connectivity and preserve closure, stop
+Branch C rather than tuning its thresholds.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,
