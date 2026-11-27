@@ -69,6 +69,8 @@ class StationaryScanAggregationTest(unittest.TestCase):
         self.assertEqual(selector.summary()["published_episodes"], 1)
         self.assertEqual(
             selector.summary()["published_episode_scan_counts"], [3])
+        self.assertEqual(selector.summary()["published_sequences"], [12])
+        self.assertEqual(selector.summary()["published_end_stamps"], [1.2])
 
     def test_missing_bin_requires_observation_fraction(self):
         selector = self.module.StationaryMedianScanSelector(

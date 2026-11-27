@@ -497,13 +497,18 @@ def replay(database, node, rate=1.0, start_delay=2.0, linger=1.0,
                 time.sleep(remaining)
             lateness = max(0.0, time.monotonic() - target)
             timing.observe(sequence, topic, relative_s, lateness)
-            payload = json.loads(encoded)
-            if topic == "/scan_slam":
-                if stationary_selector is not None:
-                    payload = stationary_selector.payload_for(sequence)
-                    if payload is None:
-                        continue
-                else:
+            if topic == "/scan_slam" and stationary_selector is not None:
+                # The selector already decoded and consolidated scan payloads
+                # before scheduling began.  Do not decode 1,000+ rejected
+                # arrays again in the real-time loop; that allocation can
+                # introduce garbage-collection stalls into otherwise sparse
+                # stop-and-scan playback.
+                payload = stationary_selector.payload_for(sequence)
+                if payload is None:
+                    continue
+            else:
+                payload = json.loads(encoded)
+                if topic == "/scan_slam":
                     keep_scan = True
                     if (rotation_filter is not None
                             and not rotation_filter.keep(payload)):

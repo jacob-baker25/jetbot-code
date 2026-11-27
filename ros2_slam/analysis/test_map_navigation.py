@@ -45,6 +45,14 @@ class MapNavigationTest(unittest.TestCase):
                                  goals_world=[(.65, .35)])
             self.assertFalse(report["goals"][0]["reachable"])
             self.assertFalse(report["turning_clearance_evaluated"])
+            self.assertEqual(
+                report["occupied_geometry"]["component_count_8_connected"], 1)
+            self.assertEqual(
+                report["occupied_geometry"]["isolated_cell_count_8_connected"], 0)
+            self.assertGreaterEqual(
+                report["clearance_connectivity"]["component_count_4_connected"], 2)
+            self.assertGreater(
+                report["clearance_connectivity"]["largest_component_area_m2"], 0)
             json.dumps(report, allow_nan=False)
 
     def test_world_conversion_respects_pgm_vertical_axis(self):

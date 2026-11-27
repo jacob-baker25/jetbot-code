@@ -73,6 +73,8 @@ class StationaryMedianScanSelector(object):
         self.short_episodes_rejected = 0
         self.published_episodes = 0
         self.published_episode_scan_counts = []
+        self.published_sequences = []
+        self.published_end_stamps = []
         self.output_valid_bins = []
 
     def scan_state(self, payload):
@@ -174,6 +176,8 @@ class StationaryMedianScanSelector(object):
         self.selected[sequence] = aggregate
         self.published_episodes += 1
         self.published_episode_scan_counts.append(len(episode))
+        self.published_sequences.append(sequence)
+        self.published_end_stamps.append(stamp_seconds(aggregate["header"]))
         self.output_valid_bins.append(sum(
             1 for value in aggregate["ranges"] if finite_number(value)))
 
@@ -213,13 +217,15 @@ class StationaryMedianScanSelector(object):
     @classmethod
     def from_connection(cls, connection, timeline, **kwargs):
         selector = cls(timeline, **kwargs)
-        records = []
         import json
-        for sequence, encoded in connection.execute(
-                "SELECT sequence, payload FROM messages "
-                "WHERE topic='/scan_slam' ORDER BY sequence"):
-            records.append((sequence, json.loads(encoded)))
-        return selector.prepare(records)
+
+        def records():
+            for sequence, encoded in connection.execute(
+                    "SELECT sequence, payload FROM messages "
+                    "WHERE topic='/scan_slam' ORDER BY sequence"):
+                yield sequence, json.loads(encoded)
+
+        return selector.prepare(records())
 
     def payload_for(self, sequence):
         return self.selected.get(int(sequence))
@@ -245,5 +251,7 @@ class StationaryMedianScanSelector(object):
             "published_episodes": self.published_episodes,
             "published_episode_scan_counts": (
                 self.published_episode_scan_counts),
+            "published_sequences": self.published_sequences,
+            "published_end_stamps": self.published_end_stamps,
             "output_valid_bins": self.output_valid_bins,
         }

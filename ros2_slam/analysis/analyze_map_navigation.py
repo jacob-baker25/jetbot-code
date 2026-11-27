@@ -164,6 +164,43 @@ def reachable_cells(grid, blocked, start):
     return seen
 
 
+def component_sizes(grid, included, diagonal=False):
+    """Return connected-component sizes for a byte mask in map coordinates."""
+    if len(included) != grid.width * grid.height:
+        raise ValueError("Component mask size does not match map")
+    if diagonal:
+        offsets = tuple(
+            (dx, dy)
+            for dy in (-1, 0, 1)
+            for dx in (-1, 0, 1)
+            if dx or dy)
+    else:
+        offsets = ((-1, 0), (1, 0), (0, -1), (0, 1))
+    visited = bytearray(len(included))
+    sizes = []
+    for row in range(grid.height):
+        for column in range(grid.width):
+            index = grid.index(column, row)
+            if not included[index] or visited[index]:
+                continue
+            visited[index] = 1
+            size = 0
+            queue = deque([(column, row)])
+            while queue:
+                current_column, current_row = queue.popleft()
+                size += 1
+                for dx, dy in offsets:
+                    target = current_column + dx, current_row + dy
+                    if not grid.in_bounds(target):
+                        continue
+                    target_index = grid.index(*target)
+                    if included[target_index] and not visited[target_index]:
+                        visited[target_index] = 1
+                        queue.append(target)
+            sizes.append(size)
+    return sorted(sizes, reverse=True)
+
+
 def read_trajectory(path, grid):
     cells = []
     with path.open(newline="") as stream:
@@ -217,6 +254,14 @@ def analyze(yaml_path, robot_width, safety_margin, trajectory=None,
         })
     trajectory_blocked = sum(
         bool(blocked[grid.index(*cell)]) for cell in trajectory_cells)
+    occupied_mask = bytearray(
+        state == grid.OCCUPIED for state in grid.cells)
+    occupied_components = component_sizes(
+        grid, occupied_mask, diagonal=True)
+    clearance_mask = bytearray(not value for value in blocked)
+    clearance_components = component_sizes(
+        grid, clearance_mask, diagonal=False)
+    cell_area = grid.config["resolution"] ** 2
     return {
         "map_yaml": str(yaml_path),
         "image": str(grid.config["image"]),
@@ -234,6 +279,21 @@ def analyze(yaml_path, robot_width, safety_margin, trajectory=None,
         "unknown_treated_as_blocked": True,
         "start_cell": list(start) if start is not None else None,
         "reachable_cell_count": len(reachable),
+        "occupied_geometry": {
+            "component_count_8_connected": len(occupied_components),
+            "isolated_cell_count_8_connected": sum(
+                size == 1 for size in occupied_components),
+            "largest_component_cells": (
+                occupied_components[0] if occupied_components else 0),
+        },
+        "clearance_connectivity": {
+            "component_count_4_connected": len(clearance_components),
+            "largest_component_cells": (
+                clearance_components[0] if clearance_components else 0),
+            "largest_component_area_m2": (
+                (clearance_components[0] if clearance_components else 0)
+                * cell_area),
+        },
         "goals": goal_rows,
         "trajectory": {
             "unique_cells": len(trajectory_cells),
