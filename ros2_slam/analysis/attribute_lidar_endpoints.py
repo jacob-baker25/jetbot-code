@@ -20,6 +20,8 @@ sys.path.insert(0, str(ROOT / "local_nodes"))
 
 from lidar_deskew import (  # noqa: E402
     PoseTimeline, ScanDeskewer, pose_samples_from_connection, stamp_seconds)
+from stationary_scan_aggregation import (  # noqa: E402
+    StationaryMedianScanSelector)
 
 
 PASS_NAMES = ("prelude", "outbound", "turnaround", "return", "postlude")
@@ -61,6 +63,13 @@ def checkpoint_pose(checkpoint):
         raise AttributionError("Checkpoint has no RF2O or SLAM pose")
     return float(value["x"]), float(value["y"]), math.radians(
         float(value["yaw_deg"]))
+
+
+def scan_payload_for(sequence, encoded, stationary_selector=None):
+    """Return the requested immutable scan policy's payload, if selected."""
+    if stationary_selector is None:
+        return json.loads(encoded)
+    return stationary_selector.payload_for(sequence)
 
 
 def load_route(results_json):
@@ -209,6 +218,99 @@ def neighborhood_overlap(first, second, radius=1):
     return matched, matched / float(len(first))
 
 
+def transform_cells(cells, resolution, delta_x, delta_y, delta_yaw):
+    """Apply one map-frame SE(2) correction to quantized endpoint cells."""
+    cosine = math.cos(delta_yaw)
+    sine = math.sin(delta_yaw)
+    transformed = set()
+    for cell_x, cell_y in cells:
+        x = (cell_x + 0.5) * resolution
+        y = (cell_y + 0.5) * resolution
+        corrected_x = cosine * x - sine * y + delta_x
+        corrected_y = sine * x + cosine * y + delta_y
+        transformed.add(cell_for_point(
+            (corrected_x, corrected_y), resolution))
+    return transformed
+
+
+def expanded_cells(cells, radius):
+    return {
+        (x + dx, y + dy)
+        for x, y in cells
+        for dx in range(-radius, radius + 1)
+        for dy in range(-radius, radius + 1)
+    }
+
+
+def optimize_pass_alignment(first, second, resolution=0.05,
+                            translation_window=0.20,
+                            translation_step=0.05,
+                            rotation_window=math.radians(10.0),
+                            rotation_step=math.radians(2.0), radius=1):
+    """Find a bounded rigid return-pass correction by symmetric overlap."""
+    values = (resolution, translation_step, rotation_step)
+    if any(not math.isfinite(value) or value <= 0 for value in values):
+        raise AttributionError("Alignment resolution and steps must be positive")
+    if (not math.isfinite(translation_window) or translation_window < 0
+            or not math.isfinite(rotation_window) or rotation_window < 0
+            or radius < 0):
+        raise AttributionError("Alignment windows and radius must be nonnegative")
+    if not first or not second:
+        return None
+    translation_steps = int(round(translation_window / translation_step))
+    rotation_steps = int(round(rotation_window / rotation_step))
+    expanded_first = expanded_cells(first, radius)
+    best = None
+    evaluated = 0
+    for x_step in range(-translation_steps, translation_steps + 1):
+        delta_x = x_step * translation_step
+        for y_step in range(-translation_steps, translation_steps + 1):
+            delta_y = y_step * translation_step
+            for yaw_step in range(-rotation_steps, rotation_steps + 1):
+                delta_yaw = yaw_step * rotation_step
+                corrected = transform_cells(
+                    second, resolution, delta_x, delta_y, delta_yaw)
+                expanded_corrected = expanded_cells(corrected, radius)
+                first_fraction = len(first & expanded_corrected) / float(
+                    len(first))
+                second_fraction = len(corrected & expanded_first) / float(
+                    len(corrected))
+                symmetric = min(first_fraction, second_fraction)
+                mean_fraction = 0.5 * (first_fraction + second_fraction)
+                correction_size = math.hypot(delta_x, delta_y)
+                score = (
+                    symmetric, mean_fraction, -correction_size,
+                    -abs(delta_yaw))
+                evaluated += 1
+                if best is None or score > best[0]:
+                    best = (score, delta_x, delta_y, delta_yaw,
+                            first_fraction, second_fraction, len(corrected))
+    unused_score, delta_x, delta_y, delta_yaw, first_fraction, \
+        second_fraction, second_count = best
+    return {
+        "evaluated_poses": evaluated,
+        "translation_window_m": translation_window,
+        "translation_step_m": translation_step,
+        "rotation_window_deg": math.degrees(rotation_window),
+        "rotation_step_deg": math.degrees(rotation_step),
+        "neighborhood_radius_cells": radius,
+        "best_correction": {
+            "x_m": delta_x,
+            "y_m": delta_y,
+            "yaw_deg": math.degrees(delta_yaw),
+            "translation_m": math.hypot(delta_x, delta_y),
+        },
+        "within_neighborhood": {
+            "first_fraction": first_fraction,
+            "second_fraction": second_fraction,
+            "symmetric_minimum_fraction": min(
+                first_fraction, second_fraction),
+        },
+        "first_endpoint_cells": len(first),
+        "second_endpoint_cells": second_count,
+    }
+
+
 def image_bounds(*cell_sets):
     combined = set()
     for values in cell_sets:
@@ -291,7 +393,8 @@ def analyze(database, results_json, output, resolution=0.05,
             rotation_threshold=math.radians(1.0),
             gate_distance=0.5, gate_heading=0.5,
             keyframe_minimum_hits=1,
-            laser_x=0.0, laser_y=0.0, laser_yaw=math.pi):
+            laser_x=0.0, laser_y=0.0, laser_yaw=math.pi,
+            stationary_median_scans=False):
     output = Path(output).resolve()
     if output.exists():
         raise AttributionError("Output already exists: {}".format(output))
@@ -304,6 +407,10 @@ def analyze(database, results_json, output, resolution=0.05,
     output.mkdir(parents=True)
     try:
         timeline = PoseTimeline(pose_samples_from_connection(connection))
+        stationary_selector = None
+        if stationary_median_scans:
+            stationary_selector = StationaryMedianScanSelector.from_connection(
+                connection, timeline)
         deskewer = ScanDeskewer(
             timeline, laser_x=laser_x, laser_y=laser_y,
             laser_yaw=laser_yaw)
@@ -328,10 +435,13 @@ def analyze(database, results_json, output, resolution=0.05,
         scans_without_end_pose = 0
 
         cursor = connection.execute(
-            "SELECT payload FROM messages WHERE topic='/scan_slam' "
+            "SELECT sequence, payload FROM messages WHERE topic='/scan_slam' "
             "ORDER BY sequence")
-        for encoded, in cursor:
-            scan = json.loads(encoded)
+        for sequence, encoded in cursor:
+            scan = scan_payload_for(
+                sequence, encoded, stationary_selector)
+            if scan is None:
+                continue
             end = stamp_seconds(scan["header"])
             start = end - float(scan["scan_time"])
             if not timeline.covers(end, end):
@@ -451,6 +561,10 @@ def analyze(database, results_json, output, resolution=0.05,
             neighborhood_overlap(keyframe_outbound, keyframe_return, radius=1))
         keyframe_return_near_count, keyframe_return_near_fraction = (
             neighborhood_overlap(keyframe_return, keyframe_outbound, radius=1))
+        pass_alignment = optimize_pass_alignment(
+            outbound, returning, resolution=resolution)
+        keyframe_pass_alignment = optimize_pass_alignment(
+            keyframe_outbound, keyframe_return, resolution=resolution)
         manifest = {
             "version": 1,
             "database": str(Path(database).resolve()),
@@ -460,6 +574,12 @@ def analyze(database, results_json, output, resolution=0.05,
             "maximum_range_m": maximum_range,
             "minimum_hits_per_cell": minimum_hits,
             "keyframe_minimum_hits_per_cell": keyframe_minimum_hits,
+            "scan_input_policy": (
+                "stationary_median" if stationary_selector is not None
+                else "all"),
+            "stationary_median_selection": (
+                stationary_selector.summary()
+                if stationary_selector is not None else None),
             "translation_threshold_m_per_scan": translation_threshold,
             "rotation_threshold_deg_per_scan": math.degrees(
                 rotation_threshold),
@@ -540,6 +660,8 @@ def analyze(database, results_json, output, resolution=0.05,
                 "within_one_cell_return_count": keyframe_return_near_count,
                 "within_one_cell_return_fraction": keyframe_return_near_fraction,
             },
+            "bounded_pass_alignment": pass_alignment,
+            "bounded_keyframe_pass_alignment": keyframe_pass_alignment,
             "image_legend": {
                 "pass_colors_rgb": PASS_COLORS,
                 "motion_colors_rgb": MOTION_COLORS,
@@ -572,6 +694,7 @@ def main(args=None):
     parser.add_argument("--laser-x", type=float, default=0.0)
     parser.add_argument("--laser-y", type=float, default=0.0)
     parser.add_argument("--laser-yaw", type=float, default=math.pi)
+    parser.add_argument("--stationary-median-scans", action="store_true")
     parsed = parser.parse_args(args)
     if parsed.rotation_threshold_degrees <= 0:
         parser.error("rotation threshold must be positive")
@@ -587,7 +710,8 @@ def main(args=None):
         gate_heading=parsed.gate_heading,
         keyframe_minimum_hits=parsed.keyframe_minimum_hits,
         laser_x=parsed.laser_x, laser_y=parsed.laser_y,
-        laser_yaw=parsed.laser_yaw)
+        laser_yaw=parsed.laser_yaw,
+        stationary_median_scans=parsed.stationary_median_scans)
     print("LIDAR_ENDPOINT_ATTRIBUTION " + json.dumps({
         "output": manifest["output"],
         "turnaround_start_label": manifest["route"][
@@ -596,7 +720,11 @@ def main(args=None):
             "turnaround_end_label"],
         "pass_overlap": manifest["pass_overlap"],
         "keyframe_pass_overlap": manifest["keyframe_pass_overlap"],
+        "bounded_pass_alignment": manifest["bounded_pass_alignment"],
+        "bounded_keyframe_pass_alignment": manifest[
+            "bounded_keyframe_pass_alignment"],
         "scan_gate": manifest["scan_gate"],
+        "scan_input_policy": manifest["scan_input_policy"],
         "scan_counts": manifest["scan_counts"],
         "keyframe_scan_counts": manifest["keyframe_scan_counts"],
     }, sort_keys=True), flush=True)

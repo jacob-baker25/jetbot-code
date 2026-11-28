@@ -239,6 +239,33 @@ safety thresholds remain fixed.  If the corrected replay does not materially
 improve clearance connectivity and the known false barrier, stop Branch C;
 do not try another travel distance or median threshold.
 
+### Branch C final result and pose isolation (2026-11-27)
+
+The corrected 0.25 m gate inserted 24 scans instead of 15, confirming that the
+dense-stop implementation correction took effect.  It did not qualify: the
+largest 0.16 m-clearance component fell to 613 cells (1.533 m2), compared with
+694 cells (1.735 m2) for strict baseline, and the false-wall/fan structures
+remained.  The trajectory blocked fraction improved from 36.8 to 32.9 percent
+but remained far from a connected navigation route.  Eighteen of 23 sequential
+matches were rejected by the fixed safety guards, mostly because the requested
+translation corrections exceeded 0.05 m.  Branch C is stopped.
+
+A Karto-free attribution projected the same 46 stationary median scans directly
+at their recorded fused-odometry poses.  Outbound and return endpoints agreed
+within one 0.05 m cell by only 64.6 and 62.3 percent.  The 0.25 m keyframe subset
+agreed by only 63.5 and 64.7 percent.  A bounded global correction search over
++/-0.20 m and +/-10 degrees could raise the keyframe symmetric minimum only to
+68.4 percent; its best coarse correction was +0.05 m x, +0.05 m y, and 0 degrees.
+The all-median search did not improve the original symmetric minimum.  The
+inter-pass discrepancy therefore varies along the route and cannot be repaired
+by one end-of-route transform.
+
+This evidence selects Branch B.  Stationary LiDAR observations are repeatable,
+deskew and stop medians do not restore connectivity, and pose-only projection
+already contains the duplicated geometry.  The next work must independently
+measure or replace translation/planar pose; no further scan-selection, travel
+gate, or sequential-matcher sweep is authorized on this capture.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,

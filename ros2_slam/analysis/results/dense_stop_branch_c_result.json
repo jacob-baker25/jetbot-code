@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "date": "2026-11-27",
+  "capture": {
+    "name": "lidar_dense_stop_home_l_3b4c372_02",
+    "source_git_head": "3b4c372ba44b0b56bb48a469ea3052f9e9b2e183",
+    "replay_archive_sha256": "35cc06cb5f4d73fcf50bd6f1f19385a421f206a82f38353b6ca7465bda520c9b",
+    "database_sha256": "89ad4dbd6b6ed47f0ddb1c2cc2cf892b5d58bea4253c259dccf2b69aa17e67d1",
+    "observed_scans": 4205,
+    "stationary_scans": 3087,
+    "stationary_median_episodes": 46
+  },
+  "map_comparison": {
+    "strict_baseline": {
+      "archive_sha256": "d1834f913298cab993e7d17a6b893ee0270d5d8214a3a7627dd50624a4093741",
+      "map_pgm_sha256": "69699bdc8b4c880a2a16359929f3db407f0b15df2af9253ccd87701e84afae8e",
+      "inserted_scans": 31,
+      "free_cells": 9508,
+      "largest_clearance_component_cells": 694,
+      "largest_clearance_component_area_m2": 1.7350000517070296,
+      "trajectory_blocked_fraction": 0.3675675675675676
+    },
+    "median_gate_050": {
+      "archive_sha256": "16b8e6ce1d83d55bd7ae0517773e43875a6a5e9c879a34edcfb4b1a67752257c",
+      "map_pgm_sha256": "443d95796b8b565f1adddf688740ba5f61f677ff51a8d612c69d8987c4c60a79",
+      "inserted_scans": 15,
+      "free_cells": 6746,
+      "largest_clearance_component_cells": 626,
+      "largest_clearance_component_area_m2": 1.5650000466406349,
+      "trajectory_blocked_fraction": 0.36787564766839376
+    },
+    "median_gate_025": {
+      "archive_sha256": "3b78383597fe6ee649ce231980e544c6af026829e2575c904f8285e384f198ff",
+      "map_pgm_sha256": "4340c14b2833fd6e34189d3f579acdd24ae1ba69e0539a08e19960f9ef0eb9c1",
+      "inserted_scans": 24,
+      "sequential_matches_accepted": 5,
+      "sequential_matches_rejected": 18,
+      "free_cells": 7872,
+      "largest_clearance_component_cells": 613,
+      "largest_clearance_component_area_m2": 1.5325000456720594,
+      "trajectory_blocked_fraction": 0.32926829268292684
+    }
+  },
+  "pose_only_attribution": {
+    "all_medians_within_one_cell": {
+      "outbound_fraction": 0.6459459459459459,
+      "return_fraction": 0.6226415094339622
+    },
+    "gate_025_keyframes_within_one_cell": {
+      "outbound_fraction": 0.6350184956843403,
+      "return_fraction": 0.6469957081545065
+    },
+    "best_bounded_keyframe_correction": {
+      "x_m": 0.05,
+      "y_m": 0.05,
+      "yaw_deg": 0.0,
+      "symmetric_minimum_fraction": 0.6840128755364807,
+      "translation_window_m": 0.2,
+      "translation_step_m": 0.05,
+      "rotation_window_deg": 10.0,
+      "rotation_step_deg": 2.0,
+      "evaluated_poses": 891
+    }
+  },
+  "decision": {
+    "branch_c": "stopped",
+    "selected_next_branch": "translation_pose",
+    "reason": "Stationary medians projected without SLAM still disagree between passes, and one bounded rigid correction does not reconcile the route."
+  }
+}

@@ -117,6 +117,36 @@ class AttributeLidarEndpointsTest(unittest.TestCase):
         self.assertIsNone(
             self.module.category_color({"a": 1}, ("a", "b"), colors, 2))
 
+    def test_scan_payload_policy_uses_aggregate_without_decoding_raw(self):
+        aggregate = {"ranges": [1.0]}
+
+        class Selector(object):
+            def payload_for(self, sequence):
+                return aggregate if sequence == 7 else None
+
+        self.assertIs(
+            self.module.scan_payload_for(7, "not-json", Selector()),
+            aggregate)
+        self.assertIsNone(
+            self.module.scan_payload_for(8, "not-json", Selector()))
+        self.assertEqual(
+            self.module.scan_payload_for(7, '{"ranges": [2.0]}'),
+            {"ranges": [2.0]})
+
+    def test_bounded_pass_alignment_recovers_translation(self):
+        first = {(0, 0), (1, 0), (2, 0)}
+        second = {(2, 0), (3, 0), (4, 0)}
+        result = self.module.optimize_pass_alignment(
+            first, second, resolution=1.0,
+            translation_window=2.0, translation_step=1.0,
+            rotation_window=0.0, rotation_step=1.0, radius=0)
+        self.assertEqual(result["evaluated_poses"], 25)
+        self.assertAlmostEqual(result["best_correction"]["x_m"], -2.0)
+        self.assertAlmostEqual(result["best_correction"]["y_m"], 0.0)
+        self.assertAlmostEqual(
+            result["within_neighborhood"]["symmetric_minimum_fraction"],
+            1.0)
+
 
 if __name__ == "__main__":
     unittest.main()
