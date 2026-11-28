@@ -342,6 +342,25 @@ calibration or another independent sensor; success authorizes a configurable
 wheel-translation/Phidget-yaw odometry candidate, followed by pose-only
 endpoint attribution before any new map.
 
+An offline audit of Waveshare's official firmware download found only the
+compiled `jetbot ros code.uf2` image (SHA-256
+`35f6ac5b59ceec62a0dae1647ef7c3c207aa13f32be8f330d046f9556e366b69`),
+not the RP2040 source.  The image exposes no useful odometry-equation strings.
+The official host source establishes the field meanings and shows that it
+sends configurable linear and angular correction factors, but it does not make
+the firmware's integration math or present correction state independently
+auditable.  Do not infer accuracy from the manufacturer's field labels.  The
+measured fixed-heading trial is therefore an irreducible qualification step,
+not a repeat of the earlier RF2O translation trial.
+
+The checkpoint analyzer now turns that trial into a predeclared automatic
+decision.  It projects accumulated wheel pose along and across the initial
+heading, checks each nonzero taped distance, lateral deviation, return closure,
+checkpoint timestamp alignment, decoded frame rate, maximum receipt gap, and
+all parser error counters.  The intended expected-distance sequence is
+`0,0.9144,1.8288,0.9144,0` meters.  This analysis must be used unchanged before
+any encoder scale calibration or wheel/IMU fusion is implemented.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,

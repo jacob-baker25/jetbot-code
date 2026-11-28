@@ -71,6 +71,49 @@ class WheelCheckpointAnalysisTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 analysis.load_frames(path)
 
+    def test_path_qualification_uses_initial_heading_and_closure(self):
+        frames = [
+            frame(1, 10.0, 5.0),
+            frame(2, 11.0, 6.0),
+            frame(3, 12.0, 7.0),
+            frame(4, 13.0, 6.0),
+            frame(5, 14.0, 5.01),
+        ]
+        results = {"checkpoints": [
+            checkpoint(0, 10.0, 0.0), checkpoint(1, 11.0, 1.0),
+            checkpoint(2, 12.0, 2.0), checkpoint(3, 13.0, 1.0),
+            checkpoint(4, 14.0, 0.0)]}
+        report = analysis.analyze(results, frames)
+        qualification = analysis.qualify_path(report, [0, 1, 2, 1, 0])
+        self.assertTrue(qualification["passed"])
+        self.assertAlmostEqual(qualification["observed_closure_m"], 0.01)
+
+    def test_path_qualification_rejects_scale_or_lateral_failure(self):
+        frames = [frame(1, 10.0, 0.0), frame(2, 11.0, 1.2)]
+        frames[1]["pose"]["y_m"] = 0.1
+        results = {"checkpoints": [checkpoint(0, 10.0, 0.0),
+                                    checkpoint(1, 11.0, 1.0)]}
+        report = analysis.analyze(results, frames)
+        qualification = analysis.qualify_path(report, [0, 1])
+        self.assertFalse(qualification["passed"])
+        self.assertFalse(qualification["lateral_passed"])
+
+    def test_transport_qualification_checks_rate_gap_and_errors(self):
+        summary = {
+            "decoded_rate_hz": 49.9,
+            "maximum_receipt_gap_s": 0.022,
+            "decode_failures": 0,
+            "parser": {
+                "buffer_overflows": 0,
+                "checksum_failures": 0,
+                "discarded_bytes": 0,
+                "invalid_sizes": 0,
+            },
+        }
+        self.assertTrue(analysis.qualify_transport(summary)["passed"])
+        summary["parser"]["checksum_failures"] = 1
+        self.assertFalse(analysis.qualify_transport(summary)["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()
