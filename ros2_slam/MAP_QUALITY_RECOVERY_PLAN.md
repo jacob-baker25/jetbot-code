@@ -325,6 +325,23 @@ independent evidence and prevents a plausible-looking ROS topic from being
 accepted before its scale, signs, dropout behavior, and return closure are
 known.
 
+The full-capture smoke test also passed: 254 frames in 5.081 s (49.99 Hz), a
+maximum receipt gap of 0.0221 s, clean signal shutdown, and zero parser or
+decoder errors.  The next physical test is fixed in advance: remain at one
+heading, move 0--3--6--3--0 ft on hard floor, and drive backward for the return
+rather than turning.  Stop for five seconds and record a checkpoint at every
+mark.  Do not correct heading while moving; stop and annotate any caster event
+or unavoidable intervention.  Record the normal trial and raw encoder stream
+simultaneously, then align them by host time offline.
+
+Encoder qualification requires zero parser/decode failures, at least 45 Hz,
+no active-run receipt gap above 0.10 s, distance error no greater than 0.05 m
+per measured meter at the 3 ft and 6 ft marks, and final position closure no
+greater than 0.05 m.  RF2O is a comparator, not ground truth.  Failure selects
+calibration or another independent sensor; success authorizes a configurable
+wheel-translation/Phidget-yaw odometry candidate, followed by pose-only
+endpoint attribution before any new map.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,
