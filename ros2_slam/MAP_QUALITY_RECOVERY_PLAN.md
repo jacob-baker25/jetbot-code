@@ -218,6 +218,27 @@ immutable sensor and pose streams.  Run the fixed selector audit first, then
 exactly one strict replay and one stationary-median replay.  Do not adjust the
 episode thresholds after inspecting either map.
 
+### Dense replay insertion-gate correction (2026-11-27)
+
+The fixed selector reproducibly found 46 qualified episodes from 3,087 of
+4,205 scans.  The strict replay retained 9,508 free cells and a largest
+0.16 m-clearance component of 694 cells.  The first median replay reduced
+occupied fragmentation but retained only 6,746 free cells, reduced the largest
+clearance component to 626 cells, and left the trajectory blocked fraction
+unchanged at 36.8 percent.
+
+The SLAM log showed that this replay did not actually exercise dense keyframes:
+46 median scans were published, but the mapper inserted only 15 because its
+unchanged 0.50 m travel gate discarded most of the deliberately spaced 0.30 m
+stops.  The repository already contains and tests the
+`guarded_strict_stable025` configuration, which differs from strict only by a
+0.25 m minimum travel distance.  One final median replay with that profile is
+authorized as an implementation correction chosen from the physical stop
+spacing, not from map output.  All episode-selection and sequential-matcher
+safety thresholds remain fixed.  If the corrected replay does not materially
+improve clearance connectivity and the known false barrier, stop Branch C;
+do not try another travel distance or median threshold.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,
