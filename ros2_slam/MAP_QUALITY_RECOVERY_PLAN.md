@@ -310,6 +310,21 @@ continuous velocity frames.  Only after the real firmware frame rate and
 layout pass this gate may the decoder become a ROS 2 publisher and recorder
 input.
 
+The receive-only stationary probe passed on the stable `if00` link: 251 valid
+45-byte type-1 frames in 5.042 s (49.78 Hz), with zero checksum failures,
+decode failures, discarded bytes, or buffer overflows.  Both measured wheel
+velocities and setpoints remained exactly zero, accumulated x/y stayed zero,
+and reported yaw stayed fixed at 0.042 rad.  This validates the documented
+transport and field layout without establishing moving accuracy.
+
+Before publishing or fusing the estimate, capture every raw decoded frame with
+host receipt timestamps during one measured translation trial.  Align the
+capture to existing checkpoints offline and compare encoder odometry, RF2O,
+the fused pose, and tape measurements.  This preserves the encoder stream as
+independent evidence and prevents a plausible-looking ROS topic from being
+accepted before its scale, signs, dropout behavior, and return closure are
+known.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,

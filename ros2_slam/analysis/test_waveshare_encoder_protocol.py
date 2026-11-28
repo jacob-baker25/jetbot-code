@@ -14,6 +14,15 @@ from waveshare_encoder_protocol import (  # noqa: E402
     FrameParser, checksum, decode_telemetry)
 
 
+def load_capture_module():
+    spec = importlib.util.spec_from_file_location(
+        "capture_waveshare_encoder",
+        str(LOCAL_NODES / "capture_waveshare_encoder.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def put_i16(frame, offset, value):
     frame[offset:offset + 2] = struct.pack(">h", value)
 
@@ -74,9 +83,25 @@ class FrameParserTest(unittest.TestCase):
         self.assertEqual(parser.summary()["invalid_sizes"], 1)
 
     def test_probe_source_contains_no_serial_write(self):
-        source = (LOCAL_NODES / "probe_waveshare_encoder.py").read_text()
-        self.assertNotIn(".write(", source)
-        self.assertIn('"mode": "receive_only"', source)
+        for name in ("probe_waveshare_encoder.py", "capture_waveshare_encoder.py"):
+            source = (LOCAL_NODES / name).read_text()
+            self.assertNotIn("serial_port.write(", source)
+            self.assertIn("receive_only", source)
+
+    def test_capture_accumulator_preserves_receipts_and_gaps(self):
+        module = load_capture_module()
+        accumulator = module.CaptureAccumulator()
+        first = decode_telemetry(telemetry_frame())
+        second = dict(first)
+        row1 = accumulator.record(100.0, 20.0, first)
+        row2 = accumulator.record(100.02, 20.02, second)
+        self.assertEqual(row1["sequence"], 1)
+        self.assertEqual(row2["sequence"], 2)
+        summary = accumulator.summary()
+        self.assertEqual(summary["decoded_telemetry_frames"], 2)
+        self.assertAlmostEqual(summary["maximum_receipt_gap_s"], 0.02)
+        self.assertEqual(summary["first_receipt_unix"], 100.0)
+        self.assertEqual(summary["last_receipt_unix"], 100.02)
 
 
 if __name__ == "__main__":
