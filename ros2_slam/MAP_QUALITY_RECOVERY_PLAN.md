@@ -297,6 +297,19 @@ inspect the official protocol and implement the smallest read-only ROS 2
 encoder bridge; visual odometry or optical flow remain fallbacks rather than
 the first implementation.
 
+The no-motion inventory found ROS 2 Eloquent only: no ROS 1 installation,
+`jetbot_pro` package, live odometry topic, or ROS 2 chassis package.  It did
+find the RP2040 as a TinyUSB composite device with stable links for
+`/dev/ttyACM0` and `/dev/ttyACM1`; the independent CP2102 device is
+`/dev/ttyUSB0`.  Waveshare's launch file selects `/dev/ttyACM0` at 115200 baud.
+Its source defines a checksummed 45-byte telemetry frame containing accumulated
+planar pose, per-cycle motion, measured wheel speeds, motor setpoints, and IMU
+data.  The next gate is a five-second receive-only probe of the stable `if00`
+device link.  The probe must not send the manufacturer's parameter, PID, or
+continuous velocity frames.  Only after the real firmware frame rate and
+layout pass this gate may the decoder become a ROS 2 publisher and recorder
+input.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,
