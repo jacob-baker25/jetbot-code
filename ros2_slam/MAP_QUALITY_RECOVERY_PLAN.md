@@ -198,6 +198,26 @@ occupied fragmentation, and 0.16 m-clearance connectivity.  If the dense-stop
 median map does not materially improve connectivity and preserve closure, stop
 Branch C rather than tuning its thresholds.
 
+### Dense-stop capture status (2026-11-27)
+
+The dense-stop L-route capture completed at commit `3b4c372` with valid timing,
+fresh streams, 4,205 recorded `/scan_slam` messages, and 30 checkpoints.  The
+fixed drive speed was 0.15.  Most consecutive translation checkpoints were
+0.25--0.35 m apart.  Fused-odometry start-to-final closure was 0.009 m and 2.5
+degrees; the live strict SLAM pose closed within 0.075 m and 1.7 degrees.  The
+live map is not navigation-usable: after conservative 0.16 m center-clearance
+inflation its largest connected region is 695 cells (1.738 m2), and 68 of 185
+unique trajectory cells are blocked after inflation.
+
+The operator reported heading corrections, displaced physical foot markers,
+and manually freeing the caster after the 180-degree turn.  These disturbances
+mean the run is not independent geometric ground truth and cannot qualify a
+navigation map.  They do not invalidate the planned mapper comparison because
+the strict baseline and stationary-median candidate will replay the same
+immutable sensor and pose streams.  Run the fixed selector audit first, then
+exactly one strict replay and one stationary-median replay.  Do not adjust the
+episode thresholds after inspecting either map.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,
