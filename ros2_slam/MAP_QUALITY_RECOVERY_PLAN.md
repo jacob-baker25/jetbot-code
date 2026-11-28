@@ -266,6 +266,37 @@ already contains the duplicated geometry.  The next work must independently
 measure or replace translation/planar pose; no further scan-selection, travel
 gate, or sequential-matcher sweep is authorized on this capture.
 
+### Branch B hardware path (2026-11-27)
+
+The apparent Waveshare JetBot ROS AI Kit chassis already contains the most
+promising independent translation sensor.  Waveshare documents AB-phase Hall
+encoders on both drive motors, closed-loop motor speed control, and wheel
+odometry output.  Its official `jetbot_pro` ROS package documents raw encoder
+odometry on `/odom`, encoder measurements on `/motor/lvel` and `/motor/rvel`,
+and an encoder-plus-IMU estimate on `/odom_combined`:
+
+- https://www.waveshare.com/wiki/JetBot_ROS_AI_Kit
+- https://www.waveshare.com/wiki/View_Node_Topics_with_ROS
+- https://github.com/waveshare/jetbot_pro
+
+This is not yet proof that the present robot has the manufacturer driver or
+firmware installed.  The documented package is ROS 1, while the current mapper
+uses ROS 2 Eloquent and drives the motors through the Python JetBot API.  Do not
+install, launch, bridge, or modify firmware until a no-motion inventory has
+identified the expansion-board serial device, installed ROS distributions,
+existing `jetbot_pro` files, and any live encoder/odometry topics.
+
+If the stock encoder stream is available, record raw wheel odometry alongside
+the existing RF2O, IMU-yaw, scan, and TF streams before changing fusion.  First
+qualify it on the taped 0--1--2--1--0 m straight path using scale, lateral
+closure, repeatability, and dropout checks.  Only then add a configurable
+wheel-translation/IMU-yaw candidate and repeat the Karto-free outbound/return
+endpoint attribution.  Resume mapping only if pose-only endpoint agreement and
+the independent distance gate improve.  If the stock stream is unavailable,
+inspect the official protocol and implement the smallest read-only ROS 2
+encoder bridge; visual odometry or optical flow remain fallbacks rather than
+the first implementation.
+
 ### Branch A: sensor/timing defect
 
 Timestamp scan boundaries in the serial reader, preserve raw received order,
